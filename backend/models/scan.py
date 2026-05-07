@@ -20,6 +20,16 @@ class Severity(str, Enum):
     INFO = "info"
 
 
+class CVEMatch(BaseModel):
+    cve_id: str
+    description: str
+    cvss_score: Optional[float] = None
+    cvss_severity: Optional[str] = None
+    cwe_ids: List[str] = []
+    published: Optional[str] = None
+    similarity: float  # cosine similarity 0-1 (higher = more similar)
+
+
 class Finding(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     rule_id: str
@@ -38,6 +48,7 @@ class Finding(BaseModel):
     attack_vector: Optional[str] = None
     file_context: Optional[str] = None
     is_reachable: Optional[bool] = None
+    cve_matches: List[CVEMatch] = []
 
 
 class Report(BaseModel):
@@ -61,7 +72,7 @@ class AgentStep(BaseModel):
 
 
 class ScanState(BaseModel):
-    """LangGraph state object passed between all 5 agents."""
+    """LangGraph state object passed between all agents."""
     scan_id: str
     repo_url: str
     local_path: Optional[str] = None

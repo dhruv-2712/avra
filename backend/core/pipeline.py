@@ -1,7 +1,7 @@
 """
 AVRA LangGraph Pipeline
 ───────────────────────
-5-node graph: Ingestion → Scanner → Triage → Context → Report
+6-node graph: Ingestion → Scanner → Triage → Context → RAG → Report
 Each edge is conditional: error short-circuits to END.
 """
 from langgraph.graph import StateGraph, END
@@ -12,6 +12,7 @@ from agents.ingestion import ingestion_agent
 from agents.scanner import scanner_agent
 from agents.triage import triage_agent
 from agents.context_agent import context_agent
+from agents.rag_agent import rag_agent
 from agents.report_agent import report_agent
 
 
@@ -71,11 +72,9 @@ def _from_graph_state(gs: GraphState) -> ScanState:
 
 
 def _wrap(agent_fn):
-    """Adapter: converts GraphState ↔ ScanState so agent functions stay Pydantic-native."""
+    """Adapter: converts GraphState ↔ ScanState so agents stay Pydantic-native."""
     def node(state: GraphState) -> GraphState:
-        scan_state = _from_graph_state(state)
-        result = agent_fn(scan_state)
-        return _to_graph_state(result)
+        return _to_graph_state(agent_fn(_from_graph_state(state)))
     return node
 
 
@@ -90,16 +89,17 @@ def build_pipeline():
     graph.add_node("scanner",   _wrap(scanner_agent))
     graph.add_node("triage",    _wrap(triage_agent))
     graph.add_node("context",   _wrap(context_agent))
+    graph.add_node("rag",       _wrap(rag_agent))
     graph.add_node("report",    _wrap(report_agent))
 
     graph.set_entry_point("ingestion")
 
-    # Each node conditionally routes to next or END on error
     for src, dst in [
         ("ingestion", "scanner"),
         ("scanner",   "triage"),
         ("triage",    "context"),
-        ("context",   "report"),
+        ("context",   "rag"),
+        ("rag",       "report"),
     ]:
         graph.add_conditional_edges(
             src, _should_continue, {"continue": dst, "end": END}
@@ -114,6 +114,6 @@ PIPELINE = build_pipeline()
 
 
 def run_pipeline(scan_state: ScanState) -> ScanState:
-    """Execute the full 5-node AVRA pipeline synchronously."""
+    """Execute the full 6-node AVRA pipeline synchronously."""
     result = PIPELINE.invoke(_to_graph_state(scan_state))
     return _from_graph_state(result)
