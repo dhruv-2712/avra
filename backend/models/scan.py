@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 from enum import Enum
 import uuid
 from datetime import datetime
@@ -35,6 +35,21 @@ class Finding(BaseModel):
     confidence: Optional[float] = None
     is_false_positive: bool = False
     llm_reasoning: Optional[str] = None
+    attack_vector: Optional[str] = None
+    file_context: Optional[str] = None
+    is_reachable: Optional[bool] = None
+
+
+class Report(BaseModel):
+    scan_id: str
+    repo_url: str
+    language: Optional[str]
+    frameworks: List[str] = []
+    executive_summary: str
+    total_findings: int
+    by_severity: Dict[str, int] = {}
+    top_findings: List[Finding] = []
+    generated_at: str
 
 
 class AgentStep(BaseModel):
@@ -46,7 +61,7 @@ class AgentStep(BaseModel):
 
 
 class ScanState(BaseModel):
-    """LangGraph state object passed between agents"""
+    """LangGraph state object passed between all 5 agents."""
     scan_id: str
     repo_url: str
     local_path: Optional[str] = None
@@ -56,6 +71,8 @@ class ScanState(BaseModel):
     entry_points: List[str] = []
     raw_findings: List[Finding] = []
     triaged_findings: List[Finding] = []
+    findings_with_context: List[Finding] = []
+    report: Optional[Report] = None
     steps: List[AgentStep] = []
     error: Optional[str] = None
     status: ScanStatus = ScanStatus.PENDING
@@ -79,4 +96,5 @@ class ScanResult(BaseModel):
     language: Optional[str]
     findings: List[Finding] = []
     steps: List[AgentStep] = []
+    report: Optional[Report] = None
     error: Optional[str] = None

@@ -1,10 +1,10 @@
 """
 AVRA API Routes
 ───────────────
-POST /api/scans          — kick off a scan
-GET  /api/scans/{id}     — get scan result
-GET  /api/scans/{id}/stream — SSE stream of agent steps
-GET  /api/scans          — list recent scans
+POST /api/scans              — kick off a scan
+GET  /api/scans/{id}         — get scan result + report
+GET  /api/scans/{id}/stream  — SSE stream of agent steps, findings, report
+GET  /api/scans              — list recent scans
 """
 import asyncio
 import json
@@ -19,28 +19,25 @@ from sqlalchemy import select
 
 from core.database import get_db, Scan, ScanStatus as DBScanStatus, AsyncSessionLocal
 from models.scan import (
-    ScanRequest, ScanResponse, ScanResult, ScanState, ScanStatus, Finding, AgentStep
+    ScanRequest, ScanResponse, ScanResult, ScanState, ScanStatus, Finding, AgentStep, Report
 )
 from core.pipeline import run_pipeline
 
 router = APIRouter()
 
-# In-memory SSE event store: scan_id -> list of events
+# In-memory SSE store: scan_id → list of events
 _scan_events: dict[str, list[dict]] = {}
 _scan_complete: dict[str, asyncio.Event] = {}
 
 
 def _emit(scan_id: str, event: dict):
-    if scan_id not in _scan_events:
-        _scan_events[scan_id] = []
-    _scan_events[scan_id].append(event)
+    _scan_events.setdefault(scan_id, []).append(event)
 
 
 async def _run_scan_background(scan_id: str, repo_url: str, db_session_factory):
-    """Run the full pipeline in background, emit SSE events, persist to DB."""
+    """Run the full 5-node pipeline in background, emit SSE events, persist to DB."""
     async with db_session_factory() as db:
         try:
-            # Update DB status
             result = await db.execute(select(Scan).where(Scan.id == scan_id))
             scan_row = result.scalar_one_or_none()
             if not scan_row:
@@ -49,33 +46,40 @@ async def _run_scan_background(scan_id: str, repo_url: str, db_session_factory):
             scan_row.status = DBScanStatus.RUNNING
             await db.commit()
 
-            # Build initial state
             state = ScanState(
                 scan_id=scan_id,
                 repo_url=repo_url,
                 status=ScanStatus.RUNNING,
             )
 
-            # Run pipeline (blocking — runs in thread pool via BackgroundTasks)
             loop = asyncio.get_running_loop()
             result_state = await loop.run_in_executor(None, run_pipeline, state)
 
-            # Emit all agent steps as SSE events
+            # Emit agent steps
             for step in result_state.steps:
                 _emit(scan_id, {"type": "step", "data": step.model_dump()})
 
-            # Emit findings
-            findings_data = [f.model_dump() for f in result_state.raw_findings]
+            # Use most-enriched findings available
+            final_findings = (
+                result_state.findings_with_context
+                or result_state.triaged_findings
+                or result_state.raw_findings
+            )
+            findings_data = [f.model_dump() for f in final_findings]
             _emit(scan_id, {"type": "findings", "data": findings_data})
 
-            # Persist to DB
+            # Emit report if generated
+            report_data = result_state.report.model_dump() if result_state.report else None
+            if report_data:
+                _emit(scan_id, {"type": "report", "data": report_data})
+
+            # Persist
             scan_row.status = (
-                DBScanStatus.COMPLETE
-                if not result_state.error
-                else DBScanStatus.FAILED
+                DBScanStatus.COMPLETE if not result_state.error else DBScanStatus.FAILED
             )
             scan_row.language = result_state.language
             scan_row.findings_raw = findings_data
+            scan_row.report = report_data
             scan_row.error = result_state.error
             await db.commit()
 
@@ -104,7 +108,6 @@ async def create_scan(
 ):
     scan_id = str(uuid.uuid4())
 
-    # Persist scan row
     scan_row = Scan(
         id=scan_id,
         repo_url=request.repo_url,
@@ -113,11 +116,9 @@ async def create_scan(
     db.add(scan_row)
     await db.commit()
 
-    # Init SSE tracking
     _scan_events[scan_id] = []
     _scan_complete[scan_id] = asyncio.Event()
 
-    # Kick off background task
     background_tasks.add_task(
         _run_scan_background, scan_id, request.repo_url, AsyncSessionLocal
     )
@@ -132,23 +133,20 @@ async def create_scan(
 
 @router.get("/scans/{scan_id}/stream")
 async def stream_scan(scan_id: str):
-    """SSE endpoint — streams agent steps and findings in real time."""
+    """SSE — streams steps, findings, report, and done events."""
 
     async def event_generator() -> AsyncGenerator[str, None]:
         sent = 0
-        timeout = 300  # 5 min max
+        timeout = 600  # 10 min max for large repos + LLM triage
         elapsed = 0
 
         while elapsed < timeout:
             events = _scan_events.get(scan_id, [])
 
-            # Send any new events
             while sent < len(events):
                 event = events[sent]
                 yield f"data: {json.dumps(event)}\n\n"
                 sent += 1
-
-                # If done, close stream
                 if event.get("type") in ("done", "error"):
                     return
 
@@ -176,6 +174,7 @@ async def get_scan(scan_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Scan not found")
 
     findings = [Finding(**f) for f in (row.findings_raw or [])]
+    report = Report(**row.report) if row.report else None
 
     return ScanResult(
         scan_id=row.id,
@@ -184,6 +183,7 @@ async def get_scan(scan_id: str, db: AsyncSession = Depends(get_db)):
         language=row.language,
         findings=findings,
         steps=[],
+        report=report,
         error=row.error,
     )
 
