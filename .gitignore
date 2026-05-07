@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.db
+
+# Node
+node_modules/
+dist/
+.next/
+
+# Env
+.env
+*.env.local
+
+# Docker
+*.log
+
+# Temp clones
+/tmp/avra_*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OMC / Claude Code
+.omc/
