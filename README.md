@@ -94,4 +94,3 @@ https://github.com/ethicalhack3r/DVWA
 
 ---
 
-*AVRA // Flagship Project // NIE Mysore 2026*
