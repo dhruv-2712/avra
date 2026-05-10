@@ -72,11 +72,13 @@ Open http://localhost:5173
 ## API
 
 ```
-POST /api/scans              — start a scan
-GET  /api/scans/{id}         — get scan result (findings + steps + report)
-GET  /api/scans/{id}/stream  — SSE stream of live agent steps
-GET  /api/scans              — list recent scans
-GET  /health                 — health check
+POST /api/scans                  — start a scan
+GET  /api/scans/{id}             — get scan result (findings + steps + report)
+GET  /api/scans/{id}/stream      — SSE stream of live agent steps
+GET  /api/scans/{id}/report.md   — download Markdown report
+GET  /api/scans/{id}/report.pdf  — download PDF report
+GET  /api/scans                  — list recent scans
+GET  /health                     — health check
 ```
 
 ## Phase Roadmap
@@ -84,7 +86,8 @@ GET  /health                 — health check
 - [x] **Day 1** — FastAPI scaffold, Docker, LangGraph pipeline, GitHub cloning, language detection, Semgrep + Bandit integration, normalized `Finding` schema, SSE streaming, SQLite persistence
 - [x] **Day 2** — LLM triage agent (Groq llama-3.3-70b), context analysis agent, exploitability reasoning, false-positive filtering, structured report generation (5-node graph)
 - [x] **Day 3** — NVD CVE corpus ingested into ChromaDB, RAG agent for CVE enrichment, 6-node graph, steps persistence (`steps_raw`), Semgrep binary via multi-stage Docker build, dep stabilization
-- [ ] **Day 4** — PDF/SARIF report export, GitHub Actions CI/CD gate, Render deploy
+- [x] **Day 4** — Live per-step SSE streaming (queue-drain pattern), Report Writer: JSON → Markdown → PDF (fpdf2), `/report.md` + `/report.pdf` download endpoints, executive summary card in UI
+- [x] **Day 5** — Findings table (sortable by severity/title, inline expand with code + CVE badges), clickable scan history loads past results, severity filter, scan list auto-refresh
 
 ## Test Targets
 
