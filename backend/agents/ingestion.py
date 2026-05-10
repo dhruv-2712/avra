@@ -75,11 +75,8 @@ def clone_repository(repo_url: str, scan_id: str) -> str:
     if os.path.exists(clone_dir):
         shutil.rmtree(clone_dir)
 
-    # GIT_TERMINAL_PROMPT=0 prevents git from opening /dev/tty for credentials
-    # (fails in Docker where no tty is available)
     env = os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    env["GIT_ASKPASS"] = "echo"
+    env["GIT_TERMINAL_PROMPT"] = "0"  # never open /dev/tty in Docker
 
     git.Repo.clone_from(
         repo_url,
@@ -87,6 +84,7 @@ def clone_repository(repo_url: str, scan_id: str) -> str:
         depth=1,
         single_branch=True,
         env=env,
+        multi_options=["--config credential.helper="],  # disable credential lookup entirely
     )
     return clone_dir
 
