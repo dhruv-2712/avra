@@ -2,7 +2,7 @@
 
 > AI pipeline that audits codebases, reasons about exploitability, and generates structured security reports.
 
-**Phase 1** — Static analysis core with LangGraph pipeline, SSE streaming, and React frontend.
+**Current state** — 6-node LangGraph pipeline: static analysis → LLM triage → context reasoning → RAG CVE lookup → report generation, with SSE streaming and React frontend.
 
 ---
 
@@ -12,18 +12,20 @@
 GitHub URL
     │
     ▼
-┌─────────────────────────────────────────────────────┐
-│                  LangGraph Pipeline                  │
-│                                                     │
-│  Ingestion Agent → Scanner Agent → [Phase 2: LLM]  │
-│  (clone, detect)   (semgrep, bandit)               │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                        LangGraph Pipeline                        │
+│                                                                  │
+│  Ingestion → Scanner → Triage → Context → RAG → Reporting       │
+│  (clone,     (semgrep, (Groq    (Groq     (NVD   (Groq           │
+│   detect)     bandit)   LLM)     LLM)     CVE    LLM)            │
+│                                           chroma)                │
+└──────────────────────────────────────────────────────────────────┘
     │
     ▼ SSE stream
 React Frontend (live agent steps + findings table)
     │
     ▼
-FastAPI + SQLite (scan history + raw findings)
+FastAPI + SQLite (scan history, findings, steps, reports)
 ```
 
 ## Stack
@@ -31,23 +33,24 @@ FastAPI + SQLite (scan history + raw findings)
 | Layer | Tech |
 |-------|------|
 | Backend | FastAPI + Uvicorn |
-| Agent Orchestration | LangGraph |
-| LLM Inference | Groq (llama-3.3-70b) — Phase 2 |
-| Static Analysis | Semgrep + Bandit (Slither — Phase 3) |
-| Database | SQLite → Postgres |
+| Agent Orchestration | LangGraph (6-node graph) |
+| LLM Inference | Groq (llama-3.3-70b) |
+| Static Analysis | Semgrep (osemgrep binary) + Bandit |
+| RAG / CVE Corpus | ChromaDB + NVD NVD dataset |
+| Database | SQLite (aiosqlite) |
 | Frontend | React + Vite + SSE |
-| Deployment | Docker + Render |
+| Deployment | Docker Compose |
 
 ## Quick Start
 
 ```bash
 # 1. Clone
-git clone https://github.com/yourusername/avra
+git clone https://github.com/dhruv-2712/avra
 cd avra
 
 # 2. Set env vars
 cp .env.example .env
-# Add your GROQ_API_KEY
+# Fill in your GROQ_API_KEY
 
 # 3. Docker (recommended)
 docker-compose up --build
@@ -70,8 +73,8 @@ Open http://localhost:5173
 
 ```
 POST /api/scans              — start a scan
-GET  /api/scans/{id}         — get scan result
-GET  /api/scans/{id}/stream  — SSE stream of agent steps
+GET  /api/scans/{id}         — get scan result (findings + steps + report)
+GET  /api/scans/{id}/stream  — SSE stream of live agent steps
 GET  /api/scans              — list recent scans
 GET  /health                 — health check
 ```
@@ -79,9 +82,9 @@ GET  /health                 — health check
 ## Phase Roadmap
 
 - [x] **Day 1** — FastAPI scaffold, Docker, LangGraph pipeline, GitHub cloning, language detection, Semgrep + Bandit integration, normalized `Finding` schema, SSE streaming, SQLite persistence
-- [ ] **Day 2** — LLM triage agent (Groq), context analysis, exploitability reasoning, false-positive filtering
-- [ ] **Day 3** — CVE/NVD lookup, ChromaDB vector store, Slither (Solidity), React findings UI
-- [ ] **Day 4** — PDF/SARIF report generation, GitHub Actions CI/CD gate, Render deploy
+- [x] **Day 2** — LLM triage agent (Groq llama-3.3-70b), context analysis agent, exploitability reasoning, false-positive filtering, structured report generation (5-node graph)
+- [x] **Day 3** — NVD CVE corpus ingested into ChromaDB, RAG agent for CVE enrichment, 6-node graph, steps persistence (`steps_raw`), Semgrep binary via multi-stage Docker build, dep stabilization
+- [ ] **Day 4** — PDF/SARIF report export, GitHub Actions CI/CD gate, Render deploy
 
 ## Test Targets
 
@@ -93,4 +96,3 @@ https://github.com/ethicalhack3r/DVWA
 ```
 
 ---
-
