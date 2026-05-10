@@ -84,7 +84,8 @@ def clone_repository(repo_url: str, scan_id: str) -> str:
         depth=1,
         single_branch=True,
         env=env,
-        multi_options=["--config credential.helper="],  # disable credential lookup entirely
+        multi_options=["--config credential.helper="],
+        allow_unsafe_options=True,
     )
     return clone_dir
 
