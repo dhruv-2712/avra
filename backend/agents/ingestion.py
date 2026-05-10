@@ -84,28 +84,31 @@ def clone_repository(repo_url: str, scan_id: str) -> str:
     return clone_dir
 
 
-def detect_language(local_path: str) -> tuple[str, list[str]]:
+def detect_language(local_path: str, max_files: int = 2000) -> tuple[str, list[str]]:
     """Detect primary language and frameworks from file extensions and config files."""
     ext_counts: Counter = Counter()
     frameworks: list[str] = []
     root = Path(local_path)
+    scanned = 0
 
     for file in root.rglob("*"):
-        if file.is_file():
-            # Skip hidden dirs and dependency folders
-            parts = set(file.parts)
-            if parts.intersection(SKIP_DIRS):
-                continue
+        if not file.is_file():
+            continue
+        parts = set(file.parts)
+        if parts.intersection(SKIP_DIRS):
+            continue
 
-            ext = file.suffix.lower()
-            if ext in LANG_MAP:
-                ext_counts[LANG_MAP[ext]] += 1
+        ext = file.suffix.lower()
+        if ext in LANG_MAP:
+            ext_counts[LANG_MAP[ext]] += 1
 
-            # Check framework signals
-            if file.name in FRAMEWORK_SIGNALS:
-                frameworks.extend(FRAMEWORK_SIGNALS[file.name])
+        if file.name in FRAMEWORK_SIGNALS:
+            frameworks.extend(FRAMEWORK_SIGNALS[file.name])
 
-    # Dominant language
+        scanned += 1
+        if scanned >= max_files:
+            break
+
     if not ext_counts:
         return "Unknown", list(set(frameworks))
 
