@@ -85,12 +85,12 @@ def _should_continue(state: GraphState) -> str:
 def build_pipeline():
     graph = StateGraph(GraphState)
 
-    graph.add_node("ingestion", _wrap(ingestion_agent))
-    graph.add_node("scanner",   _wrap(scanner_agent))
-    graph.add_node("triage",    _wrap(triage_agent))
-    graph.add_node("context",   _wrap(context_agent))
-    graph.add_node("rag",       _wrap(rag_agent))
-    graph.add_node("report",    _wrap(report_agent))
+    graph.add_node("ingestion",  _wrap(ingestion_agent))
+    graph.add_node("scanner",    _wrap(scanner_agent))
+    graph.add_node("triage",     _wrap(triage_agent))
+    graph.add_node("context",    _wrap(context_agent))
+    graph.add_node("rag",        _wrap(rag_agent))
+    graph.add_node("reporting",  _wrap(report_agent))
 
     graph.set_entry_point("ingestion")
 
@@ -99,13 +99,13 @@ def build_pipeline():
         ("scanner",   "triage"),
         ("triage",    "context"),
         ("context",   "rag"),
-        ("rag",       "report"),
+        ("rag",       "reporting"),
     ]:
         graph.add_conditional_edges(
             src, _should_continue, {"continue": dst, "end": END}
         )
 
-    graph.add_edge("report", END)
+    graph.add_edge("reporting", END)
 
     return graph.compile()
 

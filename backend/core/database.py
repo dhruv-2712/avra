@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy import Column, String, DateTime, JSON, Text, Enum as SAEnum
+from sqlalchemy import Column, String, DateTime, JSON, Text, Enum as SAEnum, text
 import enum
 import uuid
 from datetime import datetime
@@ -34,12 +34,18 @@ class Scan(Base):
     findings_raw = Column(JSON, default=list)
     findings_triaged = Column(JSON, default=list)
     report = Column(JSON, nullable=True)
+    steps_raw = Column(JSON, default=list)
     error = Column(Text, nullable=True)
 
 
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Additive migration for steps_raw column (safe to run on existing DBs)
+        try:
+            await conn.execute(text("ALTER TABLE scans ADD COLUMN steps_raw JSON"))
+        except Exception:
+            pass  # column already exists
 
 
 async def get_db() -> AsyncSession:

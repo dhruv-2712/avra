@@ -1,6 +1,7 @@
+FROM semgrep/semgrep:1.89.0 AS semgrep-binary
+
 FROM python:3.12-slim
 
-# Install system deps
 RUN apt-get update && apt-get install -y \
     git \
     curl \
@@ -8,6 +9,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Copy pre-compiled osemgrep binary — self-contained ELF, no Python/opentelemetry deps
+COPY --from=semgrep-binary /usr/local/bin/osemgrep /usr/local/bin/semgrep
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

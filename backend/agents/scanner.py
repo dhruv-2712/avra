@@ -41,55 +41,55 @@ def _step(agent: str, status: str, message: str, data=None) -> AgentStep:
     )
 
 
-def run_semgrep(local_path: str) -> list[Finding]:
-    """Run Semgrep with auto config and parse JSON output."""
+def _parse_semgrep_output(stdout: str, local_path: str) -> list[Finding]:
+    data = json.loads(stdout)
     findings = []
+    for r in data.get("results", []):
+        severity_str = r.get("extra", {}).get("severity", "WARNING").upper()
+        severity = SEVERITY_MAP_SEMGREP.get(severity_str, Severity.MEDIUM)
+        findings.append(Finding(
+            rule_id=r.get("check_id", "unknown"),
+            title=r.get("check_id", "Unknown Rule").split(".")[-1].replace("-", " ").title(),
+            description=r.get("extra", {}).get("message", "No description"),
+            file_path=os.path.relpath(r.get("path", ""), local_path),
+            line_start=r.get("start", {}).get("line", 0),
+            line_end=r.get("end", {}).get("line", None),
+            code_snippet=r.get("extra", {}).get("lines", ""),
+            severity=severity,
+            tool="semgrep",
+            cwe=_extract_cwe(r.get("extra", {}).get("metadata", {})),
+        ))
+    return findings
+
+
+def _run_semgrep_cmd(configs: list[str], local_path: str, timeout: int) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["semgrep"]
+        + [f"--config={c}" for c in configs]
+        + ["--json", "--no-git-ignore", "--timeout=60", "--max-memory=512", local_path],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def run_semgrep(local_path: str) -> tuple[list[Finding], str | None]:
+    """Run Semgrep with --config=auto (community rules, no auth required)."""
     try:
-        result = subprocess.run(
-            [
-                "semgrep",
-                "--config=auto",
-                "--json",
-                "--no-git-ignore",
-                "--timeout=60",
-                "--max-memory=512",
-                local_path,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        result = _run_semgrep_cmd(["auto"], local_path, timeout=180)
+        stderr = result.stderr.strip()
+        print(f"[semgrep] exit={result.returncode} stdout_len={len(result.stdout)} stderr={stderr[:300]}", flush=True)
 
-        if not result.stdout.strip():
-            return findings
+        if result.stdout.strip():
+            findings = _parse_semgrep_output(result.stdout, local_path)
+            return findings, None
 
-        data = json.loads(result.stdout)
-        results = data.get("results", [])
-
-        for r in results:
-            severity_str = r.get("extra", {}).get("severity", "WARNING").upper()
-            severity = SEVERITY_MAP_SEMGREP.get(severity_str, Severity.MEDIUM)
-
-            finding = Finding(
-                rule_id=r.get("check_id", "unknown"),
-                title=r.get("check_id", "Unknown Rule").split(".")[-1].replace("-", " ").title(),
-                description=r.get("extra", {}).get("message", "No description"),
-                file_path=os.path.relpath(r.get("path", ""), local_path),
-                line_start=r.get("start", {}).get("line", 0),
-                line_end=r.get("end", {}).get("line", None),
-                code_snippet=r.get("extra", {}).get("lines", ""),
-                severity=severity,
-                tool="semgrep",
-                cwe=_extract_cwe(r.get("extra", {}).get("metadata", {})),
-            )
-            findings.append(finding)
+        return [], stderr or "semgrep produced no output"
 
     except subprocess.TimeoutExpired:
-        pass
-    except Exception:
-        pass
-
-    return findings
+        return [], "semgrep timed out"
+    except Exception as e:
+        return [], str(e)
 
 
 def run_bandit(local_path: str) -> list[Finding]:
@@ -183,13 +183,14 @@ def scanner_agent(state: ScanState) -> ScanState:
         bandit_findings: list[Finding] = []
 
         # Semgrep — works on most languages
-        state.steps.append(_step(agent_name, "running", "Running Semgrep (auto config)..."))
-        semgrep_findings = run_semgrep(state.local_path)
+        state.steps.append(_step(agent_name, "running", "Running Semgrep (--config=auto)..."))
+        semgrep_findings, semgrep_err = run_semgrep(state.local_path)
         all_findings.extend(semgrep_findings)
-        state.steps.append(_step(
-            agent_name, "running",
-            f"Semgrep complete — {len(semgrep_findings)} raw findings"
-        ))
+        semgrep_status = "error" if semgrep_err and not semgrep_findings else "running"
+        semgrep_msg = f"Semgrep complete — {len(semgrep_findings)} raw findings"
+        if semgrep_err:
+            semgrep_msg += f" [warning: {semgrep_err[:200]}]"
+        state.steps.append(_step(agent_name, semgrep_status, semgrep_msg))
 
         # Bandit — Python only
         if state.language == "Python":

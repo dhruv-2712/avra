@@ -79,6 +79,7 @@ async def _run_scan_background(scan_id: str, repo_url: str, db_session_factory):
             )
             scan_row.language = result_state.language
             scan_row.findings_raw = findings_data
+            scan_row.steps_raw = [s.model_dump() for s in result_state.steps]
             scan_row.report = report_data
             scan_row.error = result_state.error
             await db.commit()
@@ -174,6 +175,7 @@ async def get_scan(scan_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Scan not found")
 
     findings = [Finding(**f) for f in (row.findings_raw or [])]
+    steps = [AgentStep(**s) for s in (row.steps_raw or [])]
     report = Report(**row.report) if row.report else None
 
     return ScanResult(
@@ -182,7 +184,7 @@ async def get_scan(scan_id: str, db: AsyncSession = Depends(get_db)):
         repo_url=row.repo_url,
         language=row.language,
         findings=findings,
-        steps=[],
+        steps=steps,
         report=report,
         error=row.error,
     )
