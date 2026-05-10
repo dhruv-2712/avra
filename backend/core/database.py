@@ -34,6 +34,7 @@ class Scan(Base):
     findings_raw = Column(JSON, default=list)
     findings_triaged = Column(JSON, default=list)
     report = Column(JSON, nullable=True)
+    report_markdown = Column(Text, nullable=True)
     steps_raw = Column(JSON, default=list)
     error = Column(Text, nullable=True)
 
@@ -41,11 +42,14 @@ class Scan(Base):
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Additive migration for steps_raw column (safe to run on existing DBs)
-        try:
-            await conn.execute(text("ALTER TABLE scans ADD COLUMN steps_raw JSON"))
-        except Exception:
-            pass  # column already exists
+        for col_ddl in [
+            "ALTER TABLE scans ADD COLUMN steps_raw JSON",
+            "ALTER TABLE scans ADD COLUMN report_markdown TEXT",
+        ]:
+            try:
+                await conn.execute(text(col_ddl))
+            except Exception:
+                pass  # column already exists
 
 
 async def get_db() -> AsyncSession:

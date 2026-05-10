@@ -133,6 +133,10 @@ def report_agent(state: ScanState) -> ScanState:
             generated_at=datetime.utcnow().isoformat(),
         )
 
+        # JSON → Markdown (PDF rendered on-demand by the API)
+        from core.report_writer import to_markdown
+        state.report_markdown = to_markdown(state.report, findings)
+
         state.status = ScanStatus.COMPLETE
         state.steps.append(_step(
             agent_name, "complete",

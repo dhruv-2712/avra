@@ -4,6 +4,8 @@ AVRA LangGraph Pipeline
 6-node graph: Ingestion → Scanner → Triage → Context → RAG → Report
 Each edge is conditional: error short-circuits to END.
 """
+import queue
+from threading import Lock
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, List, Optional, Any
 
@@ -14,6 +16,20 @@ from agents.triage import triage_agent
 from agents.context_agent import context_agent
 from agents.rag_agent import rag_agent
 from agents.report_agent import report_agent
+
+# Per-scan step queues — agents push live steps here while pipeline runs
+_step_queues: dict[str, queue.Queue] = {}
+_queues_lock = Lock()
+
+
+def register_step_queue(scan_id: str, q: queue.Queue) -> None:
+    with _queues_lock:
+        _step_queues[scan_id] = q
+
+
+def unregister_step_queue(scan_id: str) -> None:
+    with _queues_lock:
+        _step_queues.pop(scan_id, None)
 
 
 class GraphState(TypedDict):
@@ -28,6 +44,7 @@ class GraphState(TypedDict):
     triaged_findings: List[Any]
     findings_with_context: List[Any]
     report: Optional[Any]
+    report_markdown: Optional[str]
     steps: List[Any]
     error: Optional[str]
     status: str
@@ -46,6 +63,7 @@ def _to_graph_state(s: ScanState) -> GraphState:
         triaged_findings=[f.model_dump() for f in s.triaged_findings],
         findings_with_context=[f.model_dump() for f in s.findings_with_context],
         report=s.report.model_dump() if s.report else None,
+        report_markdown=s.report_markdown,
         steps=[step.model_dump() for step in s.steps],
         error=s.error,
         status=s.status.value,
@@ -65,6 +83,7 @@ def _from_graph_state(gs: GraphState) -> ScanState:
         triaged_findings=[Finding(**f) for f in gs.get("triaged_findings", [])],
         findings_with_context=[Finding(**f) for f in gs.get("findings_with_context", [])],
         report=Report(**gs["report"]) if gs.get("report") else None,
+        report_markdown=gs.get("report_markdown"),
         steps=[AgentStep(**s) for s in gs.get("steps", [])],
         error=gs.get("error"),
         status=ScanStatus(gs.get("status", "pending")),
@@ -72,9 +91,19 @@ def _from_graph_state(gs: GraphState) -> ScanState:
 
 
 def _wrap(agent_fn):
-    """Adapter: converts GraphState ↔ ScanState so agents stay Pydantic-native."""
+    """Adapter: converts GraphState ↔ ScanState; pushes new steps to live SSE queue."""
     def node(state: GraphState) -> GraphState:
-        return _to_graph_state(agent_fn(_from_graph_state(state)))
+        prev_count = len(state.get("steps", []))
+        result_gs = _to_graph_state(agent_fn(_from_graph_state(state)))
+        new_step_dicts = result_gs.get("steps", [])[prev_count:]
+        if new_step_dicts:
+            scan_id = result_gs.get("scan_id", "")
+            with _queues_lock:
+                q = _step_queues.get(scan_id)
+            if q:
+                for step_dict in new_step_dicts:
+                    q.put(AgentStep(**step_dict))
+        return result_gs
     return node
 
 

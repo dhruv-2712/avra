@@ -84,6 +84,7 @@ class ScanState(BaseModel):
     triaged_findings: List[Finding] = []
     findings_with_context: List[Finding] = []
     report: Optional[Report] = None
+    report_markdown: Optional[str] = None
     steps: List[AgentStep] = []
     error: Optional[str] = None
     status: ScanStatus = ScanStatus.PENDING

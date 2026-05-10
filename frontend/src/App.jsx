@@ -198,12 +198,71 @@ function SeverityBar({ findings }) {
   );
 }
 
+function ReportCard({ report, scanId }) {
+  const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+  return (
+    <div style={{
+      background: "#111",
+      border: "1px solid #2c2c2e",
+      borderRadius: "8px",
+      padding: "20px 24px",
+      marginBottom: "24px",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px" }}>
+        <span style={{ color: "#636366", fontSize: "11px", letterSpacing: "0.08em" }}>
+          EXECUTIVE SUMMARY
+        </span>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <a
+            href={`${API}/api/scans/${scanId}/report.md`}
+            download
+            style={{
+              background: "#1c1c1e",
+              border: "1px solid #2c2c2e",
+              borderRadius: "4px",
+              color: "#aeaeb2",
+              fontSize: "10px",
+              fontFamily: "monospace",
+              padding: "4px 10px",
+              textDecoration: "none",
+              letterSpacing: "0.06em",
+            }}
+          >
+            ↓ MD
+          </a>
+          <a
+            href={`${API}/api/scans/${scanId}/report.pdf`}
+            download
+            style={{
+              background: "rgba(191,90,242,0.1)",
+              border: "1px solid rgba(191,90,242,0.3)",
+              borderRadius: "4px",
+              color: "#bf5af2",
+              fontSize: "10px",
+              fontFamily: "monospace",
+              padding: "4px 10px",
+              textDecoration: "none",
+              letterSpacing: "0.06em",
+            }}
+          >
+            ↓ PDF
+          </a>
+        </div>
+      </div>
+      <p style={{ color: "#aeaeb2", fontSize: "13px", lineHeight: 1.7, margin: 0 }}>
+        {report.executive_summary}
+      </p>
+    </div>
+  );
+}
+
 export default function App() {
   const [repoUrl, setRepoUrl] = useState("");
   const [scanId, setScanId] = useState(null);
   const [status, setStatus] = useState("idle"); // idle | scanning | complete | error
   const [steps, setSteps] = useState([]);
   const [findings, setFindings] = useState([]);
+  const [report, setReport] = useState(null);
   const [severityFilter, setSeverityFilter] = useState("all");
   const [error, setError] = useState(null);
   const [recentScans, setRecentScans] = useState([]);
@@ -221,6 +280,7 @@ export default function App() {
     setStatus("scanning");
     setSteps([]);
     setFindings([]);
+    setReport(null);
     setError(null);
 
     try {
@@ -243,6 +303,8 @@ export default function App() {
           setSteps(prev => [...prev, event.data]);
         } else if (event.type === "findings") {
           setFindings(event.data);
+        } else if (event.type === "report") {
+          setReport(event.data);
         } else if (event.type === "done") {
           setStatus(event.data.status === "complete" ? "complete" : "error");
           es.close();
@@ -326,7 +388,7 @@ export default function App() {
             padding: "3px 8px",
             borderRadius: "3px",
             letterSpacing: "0.08em",
-          }}>PHASE 1</span>
+          }}>DAY 4</span>
           <span style={{
             background: "rgba(48,209,88,0.1)",
             color: "#30d158",
@@ -453,6 +515,11 @@ export default function App() {
               </div>
               <AgentLog steps={steps} />
             </div>
+
+            {/* Executive summary + download buttons */}
+            {report && (
+              <ReportCard report={report} scanId={scanId} />
+            )}
 
             {/* Status summary */}
             {status === "complete" && findings.length > 0 && (
@@ -607,7 +674,7 @@ export default function App() {
         fontFamily: "monospace",
         marginTop: "60px",
       }}>
-        <span>AVRA v0.1.0 // Phase 1 // Semgrep + Bandit</span>
+        <span>AVRA v0.4.0 // Day 4 // Semgrep + Bandit + RAG + PDF</span>
         <span>LangGraph · FastAPI · React</span>
       </footer>
     </div>
