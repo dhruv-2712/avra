@@ -62,25 +62,61 @@ def _parse_semgrep_output(stdout: str, local_path: str) -> list[Finding]:
     return findings
 
 
+_EXCLUDE_DIRS = [
+    "node_modules", "vendor", "build", "dist", ".next", ".nuxt",
+    "venv", ".venv", "__pycache__", "coverage", "target", "out",
+]
+
+def _semgrep_binary() -> str:
+    """Return the semgrep binary path, searching common install locations."""
+    import shutil
+    if path := shutil.which("semgrep"):
+        return path
+    candidates = [
+        os.path.expanduser("~/.local/bin/semgrep"),
+        "/usr/local/bin/semgrep",
+        "/usr/bin/semgrep",
+    ]
+    # Windows: check Python user Scripts dir
+    import site
+    try:
+        scripts = os.path.join(os.path.dirname(site.getusersitepackages()), "Scripts")
+        candidates.insert(0, os.path.join(scripts, "semgrep.exe"))
+    except Exception:
+        pass
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return "semgrep"  # fallback — will raise FileNotFoundError if truly missing
+
+
 def _run_semgrep_cmd(configs: list[str], local_path: str, timeout: int) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["semgrep"]
+    exclude_args = []
+    for d in _EXCLUDE_DIRS:
+        exclude_args += ["--exclude", d]
+    env = os.environ.copy()
+    result = subprocess.run(
+        [_semgrep_binary()]
         + [f"--config={c}" for c in configs]
-        + ["--json", "--no-git-ignore", "--timeout=60", "--max-memory=512", local_path],
+        + ["--json", "--no-git-ignore", "--timeout=60", "--max-memory=512"]
+        + exclude_args
+        + [local_path],
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=env,
     )
+    return result
 
 
 def run_semgrep(local_path: str) -> tuple[list[Finding], str | None]:
     """Run Semgrep with --config=auto (community rules, no auth required)."""
     try:
-        result = _run_semgrep_cmd(["auto"], local_path, timeout=180)
-        stderr = result.stderr.strip()
-        print(f"[semgrep] exit={result.returncode} stdout_len={len(result.stdout)} stderr={stderr[:300]}", flush=True)
+        result = _run_semgrep_cmd(["auto"], local_path, timeout=300)
+        stderr = (result.stderr or "").strip()
+        print(f"[semgrep] exit={result.returncode} stdout_len={len(result.stdout or '')} stderr={stderr[:300]}", flush=True)
 
-        if result.stdout.strip():
+        if (result.stdout or "").strip():
             findings = _parse_semgrep_output(result.stdout, local_path)
             return findings, None
 

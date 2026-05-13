@@ -11,6 +11,7 @@ GET  /api/scans                    — list recent scans
 import asyncio
 import json
 import queue as _queue
+import shutil
 import uuid
 from datetime import datetime
 from typing import AsyncGenerator
@@ -72,6 +73,10 @@ async def _run_scan_background(scan_id: str, repo_url: str, db_session_factory):
 
             unregister_step_queue(scan_id)
             result_state: ScanState = await pipeline_future
+
+            # Clean up cloned repo — all data is now in result_state
+            if result_state.local_path:
+                shutil.rmtree(result_state.local_path, ignore_errors=True)
 
             # Emit findings
             final_findings = (
