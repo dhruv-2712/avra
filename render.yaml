@@ -19,7 +19,7 @@ services:
       - key: PYTHON_VERSION
         value: "3.12.0"
 
-  - type: static
+  - type: static_site
     name: avra-frontend
     region: oregon
     rootDir: frontend
