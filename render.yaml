@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: avra-backend
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt && pip install semgrep
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///./avra.db
+      - key: CHROMA_HOST
+        value: localhost
+      - key: CHROMA_PORT
+        value: "8001"
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+
+  - type: static
+    name: avra-frontend
+    region: oregon
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://avra-backend.onrender.com
+      - key: NODE_VERSION
+        value: "20"
