@@ -360,8 +360,6 @@ export default function App() {
   const [severityFilter, setSeverityFilter] = useState("all");
   const [error, setError] = useState(null);
   const [recentScans, setRecentScans] = useState([]);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("avra_api_key") || "");
-  const [showKeyInput, setShowKeyInput] = useState(false);
   const esRef = useRef(null);
 
   useEffect(() => {
@@ -385,11 +383,9 @@ export default function App() {
     resetScanState();
 
     try {
-      const headers = { "Content-Type": "application/json" };
-      if (apiKey) headers["X-API-Key"] = apiKey;
       const res = await fetch(`${API}/api/scans`, {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repo_url: repoUrl }),
       });
       const data = await res.json();
@@ -457,11 +453,6 @@ export default function App() {
     setError("Scan cancelled.");
   };
 
-  const saveApiKey = (val) => {
-    setApiKey(val);
-    localStorage.setItem("avra_api_key", val);
-  };
-
   const criticalCount = findings.filter(f => f.severity === "critical").length;
 
   return (
@@ -507,18 +498,6 @@ export default function App() {
           <span style={{ color: "#3a3a3c", fontSize: "12px" }}>/ Agentic Vulnerability Research Assistant</span>
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <button
-            onClick={() => setShowKeyInput(v => !v)}
-            style={{
-              background: apiKey ? "rgba(191,90,242,0.1)" : "#1c1c1e",
-              border: apiKey ? "1px solid rgba(191,90,242,0.3)" : "1px solid #2c2c2e",
-              borderRadius: "3px", color: apiKey ? "#bf5af2" : "#636366",
-              fontSize: "10px", fontFamily: "monospace", padding: "3px 8px",
-              cursor: "pointer", letterSpacing: "0.08em",
-            }}
-          >
-            {apiKey ? "⚿ KEY SET" : "⚿ API KEY"}
-          </button>
           <span style={{
             background: "rgba(255,214,10,0.08)", color: "#ffd60a", fontSize: "10px",
             fontFamily: "monospace", padding: "3px 8px", borderRadius: "3px",
@@ -531,36 +510,6 @@ export default function App() {
           }}>● ONLINE</span>
         </div>
       </header>
-
-      {/* API key panel */}
-      {showKeyInput && (
-        <div style={{
-          background: "#111", borderBottom: "1px solid #2c2c2e",
-          padding: "10px 40px", display: "flex", alignItems: "center", gap: "10px",
-        }}>
-          <span style={{ color: "#636366", fontSize: "11px", fontFamily: "monospace", whiteSpace: "nowrap" }}>
-            X-API-Key
-          </span>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={e => saveApiKey(e.target.value)}
-            placeholder="Leave blank if no key is required"
-            style={{
-              flex: 1, maxWidth: "360px", background: "#1c1c1e", border: "1px solid #2c2c2e",
-              borderRadius: "4px", color: "#e5e5ea", fontSize: "12px",
-              fontFamily: "monospace", padding: "6px 10px",
-            }}
-          />
-          <button
-            onClick={() => setShowKeyInput(false)}
-            style={{
-              background: "none", border: "none", color: "#636366",
-              fontSize: "16px", cursor: "pointer", lineHeight: 1,
-            }}
-          >×</button>
-        </div>
-      )}
 
       <main style={{ maxWidth: "1100px", margin: "0 auto", padding: "40px" }}>
 

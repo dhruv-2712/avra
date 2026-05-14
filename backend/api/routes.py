@@ -22,7 +22,6 @@ from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from core.auth import require_api_key
 from core.limiter import limiter
 from core.database import get_db, Scan, ScanStatus as DBScanStatus, AsyncSessionLocal
 from core.pipeline import run_pipeline, register_step_queue, unregister_step_queue
@@ -137,7 +136,6 @@ async def create_scan(
     body: ScanRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(require_api_key),
 ):
     scan_id = str(uuid.uuid4())
     scan_row = Scan(id=scan_id, repo_url=body.repo_url, status=DBScanStatus.PENDING)
