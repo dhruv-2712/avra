@@ -34,9 +34,13 @@ app.include_router(router, prefix="/api")
 async def health():
     return {"status": "ok", "service": "AVRA"}
 
-if STATIC_DIR.exists():
+if (STATIC_DIR / "assets").exists():
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
 
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        return FileResponse(STATIC_DIR / "index.html")
+@app.get("/")
+async def serve_root():
+    return FileResponse(STATIC_DIR / "index.html")
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    return FileResponse(STATIC_DIR / "index.html")

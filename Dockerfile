@@ -18,7 +18,8 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY --from=semgrep-binary /usr/local/bin/osemgrep /usr/local/bin/semgrep
-COPY --from=frontend-builder /frontend/dist ./static
+COPY --from=frontend-builder /frontend/dist /app/static
+RUN ls /app/static/index.html
 
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
