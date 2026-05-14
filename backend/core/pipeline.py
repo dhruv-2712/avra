@@ -139,10 +139,13 @@ def build_pipeline():
     return graph.compile()
 
 
-PIPELINE = build_pipeline()
+_PIPELINE = None
 
 
 def run_pipeline(scan_state: ScanState) -> ScanState:
     """Execute the full 6-node AVRA pipeline synchronously."""
-    result = PIPELINE.invoke(_to_graph_state(scan_state))
+    global _PIPELINE
+    if _PIPELINE is None:
+        _PIPELINE = build_pipeline()
+    result = _PIPELINE.invoke(_to_graph_state(scan_state))
     return _from_graph_state(result)
