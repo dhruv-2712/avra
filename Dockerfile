@@ -18,6 +18,19 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY --from=semgrep-binary /usr/local/bin/osemgrep /usr/local/bin/semgrep
+
+# Pre-cache semgrep rule packs so scans never download rules at runtime
+RUN mkdir -p /tmp/warm && \
+    echo 'console.log(eval(x))' > /tmp/warm/a.js && \
+    echo 'import os; os.system(x)' > /tmp/warm/a.py && \
+    echo 'public class A { }' > /tmp/warm/a.java && \
+    semgrep --config=p/javascript --config=p/nodejs \
+            --config=p/python --config=p/typescript \
+            --config=p/java --config=p/golang \
+            --config=p/ruby --config=p/php \
+            --json --timeout=30 /tmp/warm 2>/dev/null; \
+    rm -rf /tmp/warm
+
 COPY --from=frontend-builder /frontend/dist /app/static
 RUN ls /app/static/index.html
 
