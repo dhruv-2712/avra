@@ -65,7 +65,23 @@ def _parse_semgrep_output(stdout: str, local_path: str) -> list[Finding]:
 _EXCLUDE_DIRS = [
     "node_modules", "vendor", "build", "dist", ".next", ".nuxt",
     "venv", ".venv", "__pycache__", "coverage", "target", "out",
+    "test", "tests", "__tests__", "spec", "specs",
+    "docs", "doc", "documentation", "examples", "fixtures", "mocks",
 ]
+
+_LANGUAGE_CONFIGS: dict[str, list[str]] = {
+    "JavaScript": ["p/javascript", "p/nodejs"],
+    "TypeScript": ["p/typescript", "p/nodejs"],
+    "Python":     ["p/python"],
+    "Java":       ["p/java"],
+    "Go":         ["p/golang"],
+    "Ruby":       ["p/ruby"],
+    "PHP":        ["p/php"],
+    "C":          ["p/c"],
+    "C++":        ["p/cpp"],
+    "Kotlin":     ["p/kotlin"],
+    "Scala":      ["p/scala"],
+}
 
 def _semgrep_binary() -> str:
     """Return the semgrep binary path, searching common install locations."""
@@ -109,10 +125,11 @@ def _run_semgrep_cmd(configs: list[str], local_path: str, timeout: int) -> subpr
     return result
 
 
-def run_semgrep(local_path: str) -> tuple[list[Finding], str | None]:
-    """Run Semgrep with --config=auto (community rules, no auth required)."""
+def run_semgrep(local_path: str, language: str | None = None) -> tuple[list[Finding], str | None]:
+    """Run Semgrep with language-specific rules, falling back to auto."""
+    configs = _LANGUAGE_CONFIGS.get(language or "", ["auto"])
     try:
-        result = _run_semgrep_cmd(["auto"], local_path, timeout=300)
+        result = _run_semgrep_cmd(configs, local_path, timeout=180)
         stderr = (result.stderr or "").strip()
         print(f"[semgrep] exit={result.returncode} stdout_len={len(result.stdout or '')} stderr={stderr[:300]}", flush=True)
 
@@ -219,8 +236,9 @@ def scanner_agent(state: ScanState) -> ScanState:
         bandit_findings: list[Finding] = []
 
         # Semgrep — works on most languages
-        state.steps.append(_step(agent_name, "running", "Running Semgrep (--config=auto)..."))
-        semgrep_findings, semgrep_err = run_semgrep(state.local_path)
+        configs = _LANGUAGE_CONFIGS.get(state.language or "", ["auto"])
+        state.steps.append(_step(agent_name, "running", f"Running Semgrep ({', '.join(configs)})..."))
+        semgrep_findings, semgrep_err = run_semgrep(state.local_path, state.language)
         all_findings.extend(semgrep_findings)
         semgrep_status = "error" if semgrep_err and not semgrep_findings else "running"
         semgrep_msg = f"Semgrep complete — {len(semgrep_findings)} raw findings"

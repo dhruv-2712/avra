@@ -160,7 +160,7 @@ def triage_agent(state: ScanState) -> ScanState:
                     false_positives += 1
 
             if batch_start + BATCH_SIZE < len(candidates):
-                time.sleep(1.5)  # 1.5s between batches → ~40 req/min max
+                time.sleep(0.3)
 
             done = min(batch_start + BATCH_SIZE, len(candidates))
             if done % 20 == 0 or done == len(candidates):
