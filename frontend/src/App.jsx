@@ -360,6 +360,8 @@ export default function App() {
   const [severityFilter, setSeverityFilter] = useState("all");
   const [error, setError] = useState(null);
   const [recentScans, setRecentScans] = useState([]);
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("avra_api_key") || "");
+  const [showKeyInput, setShowKeyInput] = useState(false);
   const esRef = useRef(null);
 
   useEffect(() => {
@@ -383,9 +385,11 @@ export default function App() {
     resetScanState();
 
     try {
+      const headers = { "Content-Type": "application/json" };
+      if (apiKey) headers["X-API-Key"] = apiKey;
       const res = await fetch(`${API}/api/scans`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ repo_url: repoUrl }),
       });
       const data = await res.json();
@@ -443,6 +447,21 @@ export default function App() {
     }
   };
 
+  const cancelScan = async () => {
+    if (!scanId) return;
+    if (esRef.current) esRef.current.close();
+    try {
+      await fetch(`${API}/api/scans/${scanId}`, { method: "DELETE" });
+    } catch {}
+    setStatus("error");
+    setError("Scan cancelled.");
+  };
+
+  const saveApiKey = (val) => {
+    setApiKey(val);
+    localStorage.setItem("avra_api_key", val);
+  };
+
   const criticalCount = findings.filter(f => f.severity === "critical").length;
 
   return (
@@ -488,10 +507,23 @@ export default function App() {
           <span style={{ color: "#3a3a3c", fontSize: "12px" }}>/ Agentic Vulnerability Research Assistant</span>
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <button
+            onClick={() => setShowKeyInput(v => !v)}
+            style={{
+              background: apiKey ? "rgba(191,90,242,0.1)" : "#1c1c1e",
+              border: apiKey ? "1px solid rgba(191,90,242,0.3)" : "1px solid #2c2c2e",
+              borderRadius: "3px", color: apiKey ? "#bf5af2" : "#636366",
+              fontSize: "10px", fontFamily: "monospace", padding: "3px 8px",
+              cursor: "pointer", letterSpacing: "0.08em",
+            }}
+          >
+            {apiKey ? "⚿ KEY SET" : "⚿ API KEY"}
+          </button>
           <span style={{
-            background: "#1c1c1e", color: "#636366", fontSize: "10px",
-            fontFamily: "monospace", padding: "3px 8px", borderRadius: "3px", letterSpacing: "0.08em",
-          }}>DAY 5</span>
+            background: "rgba(255,214,10,0.08)", color: "#ffd60a", fontSize: "10px",
+            fontFamily: "monospace", padding: "3px 8px", borderRadius: "3px",
+            border: "1px solid rgba(255,214,10,0.2)", letterSpacing: "0.08em",
+          }}>BETA</span>
           <span style={{
             background: "rgba(48,209,88,0.1)", color: "#30d158", fontSize: "10px",
             fontFamily: "monospace", padding: "3px 8px", borderRadius: "3px",
@@ -499,6 +531,36 @@ export default function App() {
           }}>● ONLINE</span>
         </div>
       </header>
+
+      {/* API key panel */}
+      {showKeyInput && (
+        <div style={{
+          background: "#111", borderBottom: "1px solid #2c2c2e",
+          padding: "10px 40px", display: "flex", alignItems: "center", gap: "10px",
+        }}>
+          <span style={{ color: "#636366", fontSize: "11px", fontFamily: "monospace", whiteSpace: "nowrap" }}>
+            X-API-Key
+          </span>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={e => saveApiKey(e.target.value)}
+            placeholder="Leave blank if no key is required"
+            style={{
+              flex: 1, maxWidth: "360px", background: "#1c1c1e", border: "1px solid #2c2c2e",
+              borderRadius: "4px", color: "#e5e5ea", fontSize: "12px",
+              fontFamily: "monospace", padding: "6px 10px",
+            }}
+          />
+          <button
+            onClick={() => setShowKeyInput(false)}
+            style={{
+              background: "none", border: "none", color: "#636366",
+              fontSize: "16px", cursor: "pointer", lineHeight: 1,
+            }}
+          >×</button>
+        </div>
+      )}
 
       <main style={{ maxWidth: "1100px", margin: "0 auto", padding: "40px" }}>
 
@@ -569,13 +631,28 @@ export default function App() {
 
             {/* Agent pipeline log */}
             <div style={{ marginBottom: "16px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px", alignItems: "center" }}>
                 <span style={{ color: "#636366", fontSize: "11px", letterSpacing: "0.08em" }}>AGENT PIPELINE</span>
-                {scanId && (
-                  <span style={{ color: "#3a3a3c", fontSize: "10px", fontFamily: "monospace" }}>
-                    {scanId.slice(0, 8)}
-                  </span>
-                )}
+                <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                  {status === "scanning" && (
+                    <button
+                      onClick={cancelScan}
+                      style={{
+                        background: "rgba(255,45,85,0.08)", border: "1px solid rgba(255,45,85,0.25)",
+                        borderRadius: "3px", color: "#ff2d55", fontSize: "10px",
+                        fontFamily: "monospace", padding: "3px 10px", cursor: "pointer",
+                        letterSpacing: "0.06em",
+                      }}
+                    >
+                      ✕ CANCEL
+                    </button>
+                  )}
+                  {scanId && (
+                    <span style={{ color: "#3a3a3c", fontSize: "10px", fontFamily: "monospace" }}>
+                      {scanId.slice(0, 8)}
+                    </span>
+                  )}
+                </div>
               </div>
               <AgentLog steps={steps} />
             </div>
@@ -681,7 +758,7 @@ export default function App() {
         display: "flex", justifyContent: "space-between",
         color: "#3a3a3c", fontSize: "10px", fontFamily: "monospace", marginTop: "60px",
       }}>
-        <span>AVRA v0.5.0 // Day 5 // Semgrep + Bandit + RAG + PDF</span>
+        <span>AVRA v0.6.0 // BETA // Semgrep + Bandit + CWE + PDF</span>
         <span>LangGraph · FastAPI · React</span>
       </footer>
     </div>

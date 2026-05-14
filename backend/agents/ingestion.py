@@ -4,9 +4,12 @@ Ingestion Agent
 Clones the target repo, detects language/framework,
 maps file structure, identifies entry points + attack surface.
 """
+import json
 import os
+import re
 import shutil
 import tempfile
+import urllib.request
 from pathlib import Path
 from collections import Counter
 from datetime import datetime
@@ -57,6 +60,28 @@ SKIP_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv",
     "dist", "build", ".next", ".nuxt", "coverage", ".pytest_cache",
 }
+
+
+def _check_repo_size(repo_url: str, max_mb: int = 150) -> None:
+    """Raise ValueError if a GitHub repo exceeds max_mb. No-ops for non-GitHub URLs."""
+    m = re.match(r"https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", repo_url)
+    if not m:
+        return
+    owner, repo = m.group(1), m.group(2)
+    api_url = f"https://api.github.com/repos/{owner}/{repo}"
+    try:
+        req = urllib.request.Request(api_url, headers={"User-Agent": "avra-scanner"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        size_kb = data.get("size", 0)
+        if size_kb > max_mb * 1024:
+            raise ValueError(
+                f"Repository is {size_kb // 1024} MB — exceeds the {max_mb} MB limit"
+            )
+    except ValueError:
+        raise
+    except Exception:
+        pass  # network / rate-limit error — proceed without blocking
 
 
 def _step(agent: str, status: str, message: str, data=None) -> AgentStep:
@@ -118,6 +143,12 @@ def detect_language(local_path: str, max_files: int = 2000) -> tuple[str, list[s
     if not ext_counts:
         return "Unknown", list(set(frameworks))
 
+    # Prefer TypeScript over JavaScript when TS files are ≥30% of the JS+TS pool
+    ts = ext_counts.get("TypeScript", 0)
+    js = ext_counts.get("JavaScript", 0)
+    if ts > 0 and js > 0 and ts / (ts + js) >= 0.3:
+        ext_counts["TypeScript"] += js  # boost so it wins most_common
+
     primary_lang = ext_counts.most_common(1)[0][0]
     return primary_lang, list(set(frameworks))
 
@@ -159,7 +190,11 @@ def ingestion_agent(state: ScanState) -> ScanState:
     agent_name = "Ingestion Agent"
 
     try:
-        # Step 1: Clone
+        # Step 1: Size check (fast-fail before cloning)
+        state.steps.append(_step(agent_name, "running", "Checking repository size..."))
+        _check_repo_size(state.repo_url)
+
+        # Step 2: Clone
         state.steps.append(_step(agent_name, "running", f"Cloning {state.repo_url}..."))
         local_path = clone_repository(state.repo_url, state.scan_id)
         state.local_path = local_path

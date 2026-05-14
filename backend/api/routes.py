@@ -1,12 +1,13 @@
 """
 AVRA API Routes
 ───────────────
-POST /api/scans                    — kick off a scan
-GET  /api/scans/{id}               — get scan result + report
-GET  /api/scans/{id}/stream        — SSE: live agent steps, findings, report
-GET  /api/scans/{id}/report.md     — download Markdown report
-GET  /api/scans/{id}/report.pdf    — download PDF report
-GET  /api/scans                    — list recent scans
+POST   /api/scans                  — kick off a scan (auth + rate-limited)
+DELETE /api/scans/{id}             — cancel a running scan
+GET    /api/scans/{id}             — get scan result + report
+GET    /api/scans/{id}/stream      — SSE: live agent steps, findings, report
+GET    /api/scans/{id}/report.md   — download Markdown report
+GET    /api/scans/{id}/report.pdf  — download PDF report
+GET    /api/scans                  — list recent scans
 """
 import asyncio
 import json
@@ -16,11 +17,13 @@ import uuid
 from datetime import datetime
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from core.auth import require_api_key
+from core.limiter import limiter
 from core.database import get_db, Scan, ScanStatus as DBScanStatus, AsyncSessionLocal
 from core.pipeline import run_pipeline, register_step_queue, unregister_step_queue
 from models.scan import (
@@ -32,6 +35,7 @@ router = APIRouter()
 # In-memory SSE store: scan_id → list of serialised events
 _scan_events: dict[str, list[dict]] = {}
 _scan_complete: dict[str, asyncio.Event] = {}
+_cancelled_scans: set[str] = set()
 
 
 def _emit(scan_id: str, event: dict) -> None:
@@ -40,11 +44,17 @@ def _emit(scan_id: str, event: dict) -> None:
 
 async def _run_scan_background(scan_id: str, repo_url: str, db_session_factory):
     """Run the 6-node pipeline, streaming each agent step live via SSE."""
+    if scan_id in _cancelled_scans:
+        return
+
     async with db_session_factory() as db:
         try:
             result = await db.execute(select(Scan).where(Scan.id == scan_id))
             scan_row = result.scalar_one_or_none()
             if not scan_row:
+                return
+
+            if scan_id in _cancelled_scans:
                 return
 
             scan_row.status = DBScanStatus.RUNNING
@@ -121,27 +131,51 @@ async def _run_scan_background(scan_id: str, repo_url: str, db_session_factory):
 
 
 @router.post("/scans", response_model=ScanResponse)
+@limiter.limit("10/minute")
 async def create_scan(
-    request: ScanRequest,
+    request: Request,
+    body: ScanRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_api_key),
 ):
     scan_id = str(uuid.uuid4())
-    scan_row = Scan(id=scan_id, repo_url=request.repo_url, status=DBScanStatus.PENDING)
+    scan_row = Scan(id=scan_id, repo_url=body.repo_url, status=DBScanStatus.PENDING)
     db.add(scan_row)
     await db.commit()
 
     _scan_events[scan_id] = []
     _scan_complete[scan_id] = asyncio.Event()
 
-    background_tasks.add_task(_run_scan_background, scan_id, request.repo_url, AsyncSessionLocal)
+    background_tasks.add_task(_run_scan_background, scan_id, body.repo_url, AsyncSessionLocal)
 
     return ScanResponse(
         scan_id=scan_id,
         status=ScanStatus.PENDING,
-        repo_url=request.repo_url,
+        repo_url=body.repo_url,
         created_at=datetime.utcnow().isoformat(),
     )
+
+
+@router.delete("/scans/{scan_id}", status_code=200)
+async def cancel_scan(scan_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Scan).where(Scan.id == scan_id))
+    row = result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if row.status not in (DBScanStatus.PENDING, DBScanStatus.RUNNING):
+        raise HTTPException(status_code=409, detail="Scan already finished")
+
+    _cancelled_scans.add(scan_id)
+    row.status = DBScanStatus.FAILED
+    row.error = "Cancelled by user"
+    await db.commit()
+
+    _emit(scan_id, {"type": "done", "data": {"status": "cancelled"}})
+    if scan_id in _scan_complete:
+        _scan_complete[scan_id].set()
+
+    return {"scan_id": scan_id, "status": "cancelled"}
 
 
 @router.get("/scans/{scan_id}/stream")

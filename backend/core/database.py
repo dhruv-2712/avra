@@ -1,12 +1,22 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy import Column, String, DateTime, JSON, Text, Enum as SAEnum, text
+from sqlalchemy import Column, String, DateTime, JSON, Text, Enum as SAEnum
 import enum
+import os
 import uuid
 from datetime import datetime
 
-DATABASE_URL = "sqlite+aiosqlite:///./avra.db"
 
+def _db_url() -> str:
+    url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./avra.db")
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql+asyncpg://", 1)
+    if url.startswith("postgresql://") and "+asyncpg" not in url:
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
+
+DATABASE_URL = _db_url()
 engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -42,14 +52,6 @@ class Scan(Base):
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        for col_ddl in [
-            "ALTER TABLE scans ADD COLUMN steps_raw JSON",
-            "ALTER TABLE scans ADD COLUMN report_markdown TEXT",
-        ]:
-            try:
-                await conn.execute(text(col_ddl))
-            except Exception:
-                pass  # column already exists
 
 
 async def get_db() -> AsyncSession:

@@ -9,5 +9,14 @@ services:
     envVars:
       - key: GROQ_API_KEY
         sync: false
+      - key: SCAN_API_KEY
+        sync: false
       - key: DATABASE_URL
-        value: sqlite+aiosqlite:///./avra.db
+        fromDatabase:
+          name: avra-db
+          property: connectionString
+
+databases:
+  - name: avra-db
+    plan: free
+    region: oregon

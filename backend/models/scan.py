@@ -48,6 +48,7 @@ class Finding(BaseModel):
     attack_vector: Optional[str] = None
     file_context: Optional[str] = None
     is_reachable: Optional[bool] = None
+    owasp_category: Optional[str] = None
     cve_matches: List[CVEMatch] = []
 
 
