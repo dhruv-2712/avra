@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API = import.meta.env.VITE_API_URL ?? "";
 
 const SEVERITY_CONFIG = {
   critical: { color: "#ff2d55", bg: "rgba(255,45,85,0.12)", label: "CRITICAL", order: 0 },

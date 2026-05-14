@@ -4,26 +4,10 @@ services:
     runtime: docker
     region: oregon
     plan: free
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     envVars:
       - key: GROQ_API_KEY
         sync: false
       - key: DATABASE_URL
         value: sqlite+aiosqlite:///./avra.db
-      - key: CHROMA_HOST
-        value: localhost
-      - key: CHROMA_PORT
-        value: "8001"
-
-  - type: static_site
-    name: avra-frontend
-    region: oregon
-    rootDir: frontend
-    buildCommand: npm install && npm run build
-    staticPublishPath: dist
-    envVars:
-      - key: VITE_API_URL
-        value: https://avra-x8zq.onrender.com
-      - key: NODE_VERSION
-        value: "20"
