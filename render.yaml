@@ -24,6 +24,6 @@ services:
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
-        value: https://avra-backend.onrender.com
+        value: https://avra-x8zq.onrender.com
       - key: NODE_VERSION
         value: "20"
