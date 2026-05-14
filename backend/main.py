@@ -1,13 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
 from api.routes import router
 from core.database import init_db
 
-STATIC_DIR = Path(__file__).parent / "static"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,13 +33,5 @@ app.include_router(router, prefix="/api")
 async def health():
     return {"status": "ok", "service": "AVRA"}
 
-if (STATIC_DIR / "assets").exists():
-    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
-
-@app.get("/")
-async def serve_root():
-    return FileResponse(STATIC_DIR / "index.html")
-
-@app.get("/{full_path:path}")
-async def serve_spa(full_path: str):
-    return FileResponse(STATIC_DIR / "index.html")
+if STATIC_DIR.exists():
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="frontend")
