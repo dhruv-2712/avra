@@ -33,16 +33,6 @@ app.include_router(router, prefix="/api")
 async def health():
     return {"status": "ok", "service": "AVRA"}
 
-@app.get("/debug-static")
-async def debug_static():
-    import os
-    return {
-        "static_dir": str(STATIC_DIR),
-        "exists": STATIC_DIR.exists(),
-        "cwd": os.getcwd(),
-        "file": __file__,
-        "contents": [str(p.name) for p in STATIC_DIR.iterdir()] if STATIC_DIR.exists() else [],
-    }
 
 if STATIC_DIR.exists():
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="frontend")
