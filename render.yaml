@@ -1,12 +1,11 @@
 services:
   - type: web
     name: avra-backend
-    runtime: python
+    runtime: docker
     region: oregon
     plan: free
-    rootDir: backend
-    buildCommand: pip install -r requirements.txt && pip install semgrep
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
     envVars:
       - key: GROQ_API_KEY
         sync: false
@@ -16,8 +15,6 @@ services:
         value: localhost
       - key: CHROMA_PORT
         value: "8001"
-      - key: PYTHON_VERSION
-        value: "3.12.0"
 
   - type: static_site
     name: avra-frontend
