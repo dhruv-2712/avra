@@ -581,16 +581,30 @@ export default function App() {
       `}</style>
 
       {/* Header */}
-      <header style={{ borderBottom: "1px solid #30363d", padding: "0 40px", height: "52px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "#0d1117", zIndex: 100 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <div style={{ width: 26, height: 26, background: "linear-gradient(135deg,#bf5af2,#ff2d55)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff" }}>◈</div>
-          <span style={{ fontWeight: 600, fontSize: "14px", letterSpacing: "0.05em" }}>AVRA</span>
-          <span style={{ color: "#3d444d", fontSize: "11px" }}>/ Agentic Vulnerability Research Assistant</span>
-        </div>
-        <div style={{ display: "flex", gap: "6px" }}>
+      <header style={{ borderBottom: "1px solid #30363d", padding: "36px 40px 30px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative", background: "#0d1117" }}>
+        <div style={{ position: "absolute", top: "16px", right: "24px", display: "flex", gap: "6px" }}>
           <span style={{ background: "rgba(255,214,10,0.07)", color: "#ffd60a", fontSize: "9px", fontFamily: "monospace", padding: "2px 7px", borderRadius: "3px", border: "1px solid rgba(255,214,10,0.12)", letterSpacing: "0.08em" }}>BETA</span>
           <span style={{ background: "rgba(48,209,88,0.07)", color: "#30d158", fontSize: "9px", fontFamily: "monospace", padding: "2px 7px", borderRadius: "3px", border: "1px solid rgba(48,209,88,0.12)" }}>● ONLINE</span>
         </div>
+        <div style={{
+          fontFamily: "'IBM Plex Sans', sans-serif",
+          fontSize: "clamp(48px, 8vw, 80px)",
+          fontWeight: 700,
+          letterSpacing: "0.2em",
+          background: "linear-gradient(135deg, #bf5af2 0%, #ff2d55 55%, #ff6b35 100%)",
+          WebkitBackgroundClip: "text",
+          WebkitTextFillColor: "transparent",
+          backgroundClip: "text",
+          lineHeight: 1,
+        }}>AVRA</div>
+        <div style={{
+          fontFamily: "'IBM Plex Mono', monospace",
+          fontSize: "clamp(9px, 1.2vw, 12px)",
+          color: "#8b949e",
+          letterSpacing: "0.25em",
+          marginTop: "12px",
+          textTransform: "uppercase",
+        }}>Agentic Vulnerability Research Assistant</div>
       </header>
 
       <main style={{ maxWidth: "1100px", margin: "0 auto", padding: "40px" }}>
