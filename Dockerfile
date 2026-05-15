@@ -9,13 +9,13 @@ FROM semgrep/semgrep:1.89.0 AS semgrep-binary
 
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
-    curl \
-    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+RUN useradd -m -u 1000 avra
 
 COPY --from=semgrep-binary /usr/local/bin/osemgrep /usr/local/bin/semgrep
 
@@ -28,7 +28,7 @@ RUN mkdir -p /tmp/warm && \
             --config=p/python --config=p/typescript \
             --config=p/java --config=p/golang \
             --config=p/ruby --config=p/php \
-            --json --timeout=30 /tmp/warm 2>/dev/null; \
+            --json --timeout=30 /tmp/warm || true; \
     rm -rf /tmp/warm
 
 COPY --from=frontend-builder /frontend/dist /app/static
@@ -38,6 +38,9 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ .
+
+RUN chown -R avra:avra /app
+USER avra
 
 EXPOSE 8000
 

@@ -4,13 +4,15 @@ Scanner Agent
 Orchestrates static analysis tools (Semgrep, Bandit).
 Normalises all tool output into a unified Finding schema.
 """
+import logging
 import subprocess
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from models.scan import ScanState, AgentStep, Finding, Severity, ScanStatus
+from core.config import SEMGREP_TIMEOUT, BANDIT_TIMEOUT, SEMGREP_MAX_MEMORY
 
 SEVERITY_MAP_SEMGREP = {
     "ERROR": Severity.HIGH,
@@ -36,22 +38,29 @@ def _step(agent: str, status: str, message: str, data=None) -> AgentStep:
         agent=agent,
         status=status,
         message=message,
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.now(timezone.utc).isoformat(),
         data=data,
     )
 
 
 def _parse_semgrep_output(stdout: str, local_path: str) -> list[Finding]:
-    data = json.loads(stdout)
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        raise ValueError("semgrep output truncated or invalid")
     findings = []
     for r in data.get("results", []):
         severity_str = r.get("extra", {}).get("severity", "WARNING").upper()
         severity = SEVERITY_MAP_SEMGREP.get(severity_str, Severity.MEDIUM)
+        try:
+            fp = os.path.relpath(r.get("path", ""), local_path)
+        except ValueError:
+            fp = r.get("path", "")
         findings.append(Finding(
             rule_id=r.get("check_id", "unknown"),
             title=r.get("check_id", "Unknown Rule").split(".")[-1].replace("-", " ").title(),
             description=r.get("extra", {}).get("message", "No description"),
-            file_path=os.path.relpath(r.get("path", ""), local_path),
+            file_path=fp,
             line_start=r.get("start", {}).get("line", 0),
             line_end=r.get("end", {}).get("line", None),
             code_snippet=r.get("extra", {}).get("lines", ""),
@@ -114,7 +123,9 @@ def _run_semgrep_cmd(configs: list[str], local_path: str, timeout: int) -> subpr
     result = subprocess.run(
         [_semgrep_binary()]
         + [f"--config={c}" for c in configs]
-        + ["--json", "--no-git-ignore", "--timeout=60", "--max-memory=512"]
+        + ["--json", "--no-git-ignore",
+           f"--timeout={SEMGREP_TIMEOUT}",
+           f"--max-memory={SEMGREP_MAX_MEMORY}"]
         + exclude_args
         + [local_path],
         capture_output=True,
@@ -129,7 +140,7 @@ def run_semgrep(local_path: str, language: str | None = None) -> tuple[list[Find
     """Run Semgrep with language-specific rules, falling back to auto."""
     configs = _LANGUAGE_CONFIGS.get(language or "", ["auto"])
     try:
-        result = _run_semgrep_cmd(configs, local_path, timeout=180)
+        result = _run_semgrep_cmd(configs, local_path, timeout=SEMGREP_TIMEOUT * 3)
         stderr = (result.stderr or "").strip()
         print(f"[semgrep] exit={result.returncode} stdout_len={len(result.stdout or '')} stderr={stderr[:300]}", flush=True)
 
@@ -145,7 +156,7 @@ def run_semgrep(local_path: str, language: str | None = None) -> tuple[list[Find
         return [], str(e)
 
 
-def run_bandit(local_path: str) -> list[Finding]:
+def run_bandit(local_path: str) -> tuple[list[Finding], str | None]:
     """Run Bandit on Python code and parse JSON output."""
     findings = []
     try:
@@ -153,12 +164,12 @@ def run_bandit(local_path: str) -> list[Finding]:
             ["bandit", "-r", local_path, "-f", "json", "-q"],
             capture_output=True,
             text=True,
-            timeout=90,
+            timeout=BANDIT_TIMEOUT,
         )
 
         output = result.stdout.strip()
         if not output:
-            return findings
+            return findings, None
 
         data = json.loads(output)
         results = data.get("results", [])
@@ -168,12 +179,16 @@ def run_bandit(local_path: str) -> list[Finding]:
             conf_str = r.get("issue_confidence", "MEDIUM").upper()
             severity = SEVERITY_MAP_BANDIT.get(sev_str, Severity.MEDIUM)
             confidence = CONFIDENCE_MAP.get(conf_str, 0.6)
+            try:
+                fp = os.path.relpath(r.get("filename", ""), local_path)
+            except ValueError:
+                fp = r.get("filename", "")
 
             finding = Finding(
                 rule_id=r.get("test_id", "unknown"),
                 title=r.get("test_name", "Unknown").replace("_", " ").title(),
                 description=r.get("issue_text", "No description"),
-                file_path=os.path.relpath(r.get("filename", ""), local_path),
+                file_path=fp,
                 line_start=r.get("line_number", 0),
                 line_end=r.get("line_range", [None])[-1] if r.get("line_range") else None,
                 code_snippet=r.get("code", ""),
@@ -184,12 +199,14 @@ def run_bandit(local_path: str) -> list[Finding]:
             )
             findings.append(finding)
 
-    except subprocess.TimeoutExpired:
-        pass
-    except Exception:
-        pass
+        return findings, None
 
-    return findings
+    except subprocess.TimeoutExpired:
+        logging.warning("bandit timed out on %s", local_path)
+        return [], "bandit timed out"
+    except Exception as e:
+        logging.warning("bandit failed: %s", e)
+        return [], str(e)
 
 
 def _extract_cwe(metadata: dict) -> str | None:
@@ -249,12 +266,12 @@ def scanner_agent(state: ScanState) -> ScanState:
         # Bandit — Python only
         if state.language == "Python":
             state.steps.append(_step(agent_name, "running", "Running Bandit (Python AST analysis)..."))
-            bandit_findings = run_bandit(state.local_path)
+            bandit_findings, bandit_err = run_bandit(state.local_path)
             all_findings.extend(bandit_findings)
-            state.steps.append(_step(
-                agent_name, "running",
-                f"Bandit complete — {len(bandit_findings)} raw findings"
-            ))
+            bandit_msg = f"Bandit complete — {len(bandit_findings)} raw findings"
+            if bandit_err:
+                bandit_msg += f" [warning: {bandit_err[:200]}]"
+            state.steps.append(_step(agent_name, "running", bandit_msg))
 
         # Deduplicate
         unique_findings = deduplicate_findings(all_findings)

@@ -1,8 +1,9 @@
-from pydantic import BaseModel, Field
+import re
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Any, Dict
 from enum import Enum
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class ScanStatus(str, Enum):
@@ -68,7 +69,7 @@ class AgentStep(BaseModel):
     agent: str
     status: str  # running | complete | error
     message: str
-    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     data: Optional[Any] = None
 
 
@@ -93,6 +94,17 @@ class ScanState(BaseModel):
 
 class ScanRequest(BaseModel):
     repo_url: str
+
+    @field_validator("repo_url")
+    @classmethod
+    def must_be_github_https(cls, v: str) -> str:
+        if not re.match(
+            r"^https://github\.com/[\w.\-]+/[\w.\-]+(?:\.git)?/?$", v
+        ):
+            raise ValueError(
+                "Only public GitHub URLs are supported: https://github.com/<owner>/<repo>"
+            )
+        return v.rstrip("/")
 
 
 class ScanResponse(BaseModel):

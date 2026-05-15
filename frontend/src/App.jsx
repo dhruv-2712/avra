@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, memo } from "react";
 
 const API = import.meta.env.VITE_API_URL ?? "";
 
@@ -53,20 +53,30 @@ function ToolBadge({ tool }) {
 
 function AgentLog({ steps }) {
   const endRef = useRef(null);
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), [steps]);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    if (nearBottom) endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [steps]);
 
   return (
-    <div style={{
-      background: "#0a0a0a",
-      border: "1px solid #1c1c1e",
-      borderRadius: "8px",
-      padding: "16px",
-      fontFamily: "monospace",
-      fontSize: "12px",
-      height: "220px",
-      overflowY: "auto",
-      lineHeight: 1.7,
-    }}>
+    <div
+      ref={containerRef}
+      style={{
+        background: "#0a0a0a",
+        border: "1px solid #1c1c1e",
+        borderRadius: "8px",
+        padding: "16px",
+        fontFamily: "monospace",
+        fontSize: "12px",
+        height: "220px",
+        overflowY: "auto",
+        lineHeight: 1.7,
+      }}
+    >
       {steps.length === 0 && (
         <span style={{ color: "#3a3a3c" }}>// Awaiting scan...</span>
       )}
@@ -91,7 +101,7 @@ function AgentLog({ steps }) {
   );
 }
 
-function FindingsTable({ findings, severityFilter, setSeverityFilter }) {
+const FindingsTable = memo(function FindingsTable({ findings, severityFilter, setSeverityFilter }) {
   const [expandedId, setExpandedId] = useState(null);
   const [sort, setSort] = useState({ col: "severity", dir: "asc" });
 
@@ -103,19 +113,20 @@ function FindingsTable({ findings, severityFilter, setSeverityFilter }) {
     );
   };
 
-  const filtered = severityFilter === "all"
-    ? findings
-    : findings.filter(f => f.severity === severityFilter);
-
-  const sorted = [...filtered].sort((a, b) => {
-    let cmp = 0;
-    if (sort.col === "severity") {
-      cmp = (SEVERITY_CONFIG[a.severity]?.order ?? 5) - (SEVERITY_CONFIG[b.severity]?.order ?? 5);
-    } else if (sort.col === "title") {
-      cmp = a.title.localeCompare(b.title);
-    }
-    return sort.dir === "desc" ? -cmp : cmp;
-  });
+  const sorted = useMemo(() => {
+    const filtered = severityFilter === "all"
+      ? findings
+      : findings.filter(f => f.severity === severityFilter);
+    return [...filtered].sort((a, b) => {
+      let cmp = 0;
+      if (sort.col === "severity") {
+        cmp = (SEVERITY_CONFIG[a.severity]?.order ?? 5) - (SEVERITY_CONFIG[b.severity]?.order ?? 5);
+      } else if (sort.col === "title") {
+        cmp = a.title.localeCompare(b.title);
+      }
+      return sort.dir === "desc" ? -cmp : cmp;
+    });
+  }, [findings, severityFilter, sort]);
 
   const SortIcon = ({ col }) => {
     if (sort.col !== col) return <span style={{ color: "#3a3a3c", marginLeft: "4px" }}>⇅</span>;
@@ -187,101 +198,101 @@ function FindingsTable({ findings, severityFilter, setSeverityFilter }) {
           </thead>
           <tbody>
             {sorted.map((f, i) => {
-              const sev = SEVERITY_CONFIG[f.severity] || SEVERITY_CONFIG.info;
               const isExpanded = expandedId === f.id;
 
-              return [
-                <tr
-                  key={f.id}
-                  onClick={() => setExpandedId(isExpanded ? null : f.id)}
-                  style={{
-                    borderTop: "1px solid #1c1c1e",
-                    background: isExpanded ? "#161616" : "transparent",
-                    cursor: "pointer",
-                    transition: "background 0.1s",
-                  }}
-                  onMouseEnter={e => { if (!isExpanded) e.currentTarget.style.background = "#111"; }}
-                  onMouseLeave={e => { if (!isExpanded) e.currentTarget.style.background = "transparent"; }}
-                >
-                  <td style={{ padding: "10px 12px", color: "#3a3a3c", fontSize: "11px", fontFamily: "monospace" }}>
-                    {String(i + 1).padStart(3, "0")}
-                  </td>
-                  <td style={{ padding: "10px 12px" }}>
-                    <SeverityBadge severity={f.severity} />
-                  </td>
-                  <td style={{ padding: "10px 12px", color: "#e5e5ea", fontSize: "12px", maxWidth: "320px" }}>
-                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {f.title}
-                    </div>
-                  </td>
-                  <td style={{ padding: "10px 12px", color: "#636366", fontSize: "11px", fontFamily: "monospace", whiteSpace: "nowrap" }}>
-                    {f.file_path?.split("/").slice(-2).join("/")}:{f.line_start}
-                  </td>
-                  <td style={{ padding: "10px 12px" }}>
-                    <ToolBadge tool={f.tool} />
-                  </td>
-                  <td style={{ padding: "10px 12px", color: "#3a3a3c", fontSize: "10px", fontFamily: "monospace" }}>
-                    {f.cwe || "—"}
-                  </td>
-                </tr>,
-
-                isExpanded && (
-                  <tr key={`${f.id}-detail`} style={{ background: "#111", borderTop: "1px solid #1c1c1e" }}>
-                    <td colSpan={6} style={{ padding: "16px 20px 16px 52px" }}>
-                      <div style={{ color: "#636366", fontFamily: "monospace", fontSize: "11px", marginBottom: "8px" }}>
-                        {f.file_path}:{f.line_start}{f.line_end ? `–${f.line_end}` : ""}
+              return (
+                <React.Fragment key={f.id}>
+                  <tr
+                    onClick={() => setExpandedId(isExpanded ? null : f.id)}
+                    style={{
+                      borderTop: "1px solid #1c1c1e",
+                      background: isExpanded ? "#161616" : "transparent",
+                      cursor: "pointer",
+                      transition: "background 0.1s",
+                    }}
+                    onMouseEnter={e => { if (!isExpanded) e.currentTarget.style.background = "#111"; }}
+                    onMouseLeave={e => { if (!isExpanded) e.currentTarget.style.background = "transparent"; }}
+                  >
+                    <td style={{ padding: "10px 12px", color: "#3a3a3c", fontSize: "11px", fontFamily: "monospace" }}>
+                      {String(i + 1).padStart(3, "0")}
+                    </td>
+                    <td style={{ padding: "10px 12px" }}>
+                      <SeverityBadge severity={f.severity} />
+                    </td>
+                    <td style={{ padding: "10px 12px", color: "#e5e5ea", fontSize: "12px", maxWidth: "320px" }}>
+                      <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {f.title}
                       </div>
-
-                      <p style={{ color: "#aeaeb2", fontSize: "12px", lineHeight: 1.6, margin: "0 0 12px 0" }}>
-                        {f.description}
-                      </p>
-
-                      {f.code_snippet && (
-                        <pre style={{
-                          background: "#0a0a0a",
-                          border: "1px solid #1c1c1e",
-                          borderRadius: "4px",
-                          padding: "10px",
-                          fontSize: "11px",
-                          color: "#e5e5ea",
-                          margin: "0 0 12px 0",
-                          overflowX: "auto",
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-all",
-                        }}>
-                          {f.code_snippet.trim()}
-                        </pre>
-                      )}
-
-                      {f.llm_reasoning && (
-                        <div style={{ color: "#636366", fontSize: "11px", fontStyle: "italic", marginBottom: "8px" }}>
-                          ↳ {f.llm_reasoning}
-                        </div>
-                      )}
-
-                      {f.cve_matches?.length > 0 && (
-                        <div style={{ marginTop: "8px" }}>
-                          {f.cve_matches.slice(0, 3).map(cve => (
-                            <span key={cve.cve_id} style={{
-                              display: "inline-block",
-                              background: "rgba(255,107,53,0.08)",
-                              border: "1px solid rgba(255,107,53,0.2)",
-                              borderRadius: "3px",
-                              color: "#ff6b35",
-                              fontSize: "10px",
-                              fontFamily: "monospace",
-                              padding: "2px 7px",
-                              marginRight: "6px",
-                            }}>
-                              {cve.cve_id}{cve.cvss_score ? ` ${cve.cvss_score}` : ""}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                    </td>
+                    <td style={{ padding: "10px 12px", color: "#636366", fontSize: "11px", fontFamily: "monospace", whiteSpace: "nowrap" }}>
+                      {f.file_path?.split("/").slice(-2).join("/")}:{f.line_start}
+                    </td>
+                    <td style={{ padding: "10px 12px" }}>
+                      <ToolBadge tool={f.tool} />
+                    </td>
+                    <td style={{ padding: "10px 12px", color: "#3a3a3c", fontSize: "10px", fontFamily: "monospace" }}>
+                      {f.cwe || "—"}
                     </td>
                   </tr>
-                ),
-              ];
+
+                  {isExpanded && (
+                    <tr style={{ background: "#111", borderTop: "1px solid #1c1c1e" }}>
+                      <td colSpan={6} style={{ padding: "16px 20px 16px 52px" }}>
+                        <div style={{ color: "#636366", fontFamily: "monospace", fontSize: "11px", marginBottom: "8px" }}>
+                          {f.file_path}:{f.line_start}{f.line_end ? `–${f.line_end}` : ""}
+                        </div>
+
+                        <p style={{ color: "#aeaeb2", fontSize: "12px", lineHeight: 1.6, margin: "0 0 12px 0" }}>
+                          {f.description}
+                        </p>
+
+                        {f.code_snippet && (
+                          <pre style={{
+                            background: "#0a0a0a",
+                            border: "1px solid #1c1c1e",
+                            borderRadius: "4px",
+                            padding: "10px",
+                            fontSize: "11px",
+                            color: "#e5e5ea",
+                            margin: "0 0 12px 0",
+                            overflowX: "auto",
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-all",
+                          }}>
+                            {f.code_snippet.trim()}
+                          </pre>
+                        )}
+
+                        {f.llm_reasoning && (
+                          <div style={{ color: "#636366", fontSize: "11px", fontStyle: "italic", marginBottom: "8px" }}>
+                            ↳ {f.llm_reasoning}
+                          </div>
+                        )}
+
+                        {f.cve_matches?.length > 0 && (
+                          <div style={{ marginTop: "8px" }}>
+                            {f.cve_matches.slice(0, 3).map(cve => (
+                              <span key={cve.cve_id} style={{
+                                display: "inline-block",
+                                background: "rgba(255,107,53,0.08)",
+                                border: "1px solid rgba(255,107,53,0.2)",
+                                borderRadius: "3px",
+                                color: "#ff6b35",
+                                fontSize: "10px",
+                                fontFamily: "monospace",
+                                padding: "2px 7px",
+                                marginRight: "6px",
+                              }}>
+                                {cve.cve_id}{cve.cvss_score ? ` ${cve.cvss_score}` : ""}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
             })}
           </tbody>
         </table>
@@ -294,7 +305,7 @@ function FindingsTable({ findings, severityFilter, setSeverityFilter }) {
       </div>
     </div>
   );
-}
+});
 
 function SeverityBar({ findings }) {
   const counts = {};

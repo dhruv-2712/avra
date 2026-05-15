@@ -14,7 +14,7 @@ import json
 import queue as _queue
 import shutil
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
@@ -25,20 +25,32 @@ from sqlalchemy import select
 from core.limiter import limiter
 from core.database import get_db, Scan, ScanStatus as DBScanStatus, AsyncSessionLocal
 from core.pipeline import run_pipeline, register_step_queue, unregister_step_queue
+from core.config import SCAN_TIMEOUT, SSE_GRACE_SECONDS
 from models.scan import (
     ScanRequest, ScanResponse, ScanResult, ScanState, ScanStatus, Finding, AgentStep, Report
 )
 
 router = APIRouter()
 
-# In-memory SSE store: scan_id → list of serialised events
-_scan_events: dict[str, list[dict]] = {}
+# In-memory SSE store: scan_id → asyncio.Queue of serialised events
+# Queues are created on scan start and cleaned up SSE_GRACE_SECONDS after stream ends.
+_scan_queues: dict[str, asyncio.Queue] = {}
 _scan_complete: dict[str, asyncio.Event] = {}
 _cancelled_scans: set[str] = set()
 
 
 def _emit(scan_id: str, event: dict) -> None:
-    _scan_events.setdefault(scan_id, []).append(event)
+    q = _scan_queues.get(scan_id)
+    if q is not None:
+        q.put_nowait(event)
+
+
+async def _cleanup_scan(scan_id: str) -> None:
+    """Remove per-scan state after a grace window for late SSE subscribers."""
+    await asyncio.sleep(SSE_GRACE_SECONDS)
+    _scan_queues.pop(scan_id, None)
+    _scan_complete.pop(scan_id, None)
+    _cancelled_scans.discard(scan_id)
 
 
 async def _run_scan_background(scan_id: str, repo_url: str, db_session_factory):
@@ -105,6 +117,7 @@ async def _run_scan_background(scan_id: str, repo_url: str, db_session_factory):
             scan_row.status = DBScanStatus.COMPLETE if not result_state.error else DBScanStatus.FAILED
             scan_row.language = result_state.language
             scan_row.findings_raw = findings_data
+            scan_row.finding_count = len(findings_data)
             scan_row.steps_raw = [s.model_dump() for s in result_state.steps]
             scan_row.report = report_data
             scan_row.report_markdown = result_state.report_markdown
@@ -117,16 +130,20 @@ async def _run_scan_background(scan_id: str, repo_url: str, db_session_factory):
         except Exception as e:
             unregister_step_queue(scan_id)
             _emit(scan_id, {"type": "error", "data": {"message": str(e)}})
-            async with db_session_factory() as db2:
-                result = await db2.execute(select(Scan).where(Scan.id == scan_id))
+            try:
+                result = await db.execute(select(Scan).where(Scan.id == scan_id))
                 row = result.scalar_one_or_none()
                 if row:
                     row.status = DBScanStatus.FAILED
                     row.error = str(e)
-                    await db2.commit()
+                    await db.rollback()
+                    await db.commit()
+            except Exception:
+                pass
         finally:
             if scan_id in _scan_complete:
                 _scan_complete[scan_id].set()
+            asyncio.create_task(_cleanup_scan(scan_id))
 
 
 @router.post("/scans", response_model=ScanResponse)
@@ -142,7 +159,7 @@ async def create_scan(
     db.add(scan_row)
     await db.commit()
 
-    _scan_events[scan_id] = []
+    _scan_queues[scan_id] = asyncio.Queue()
     _scan_complete[scan_id] = asyncio.Event()
 
     background_tasks.add_task(_run_scan_background, scan_id, body.repo_url, AsyncSessionLocal)
@@ -151,7 +168,7 @@ async def create_scan(
         scan_id=scan_id,
         status=ScanStatus.PENDING,
         repo_url=body.repo_url,
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -172,6 +189,7 @@ async def cancel_scan(scan_id: str, db: AsyncSession = Depends(get_db)):
     _emit(scan_id, {"type": "done", "data": {"status": "cancelled"}})
     if scan_id in _scan_complete:
         _scan_complete[scan_id].set()
+    asyncio.create_task(_cleanup_scan(scan_id))
 
     return {"scan_id": scan_id, "status": "cancelled"}
 
@@ -181,20 +199,21 @@ async def stream_scan(scan_id: str):
     """SSE — live agent steps, then findings + report + done."""
 
     async def event_generator() -> AsyncGenerator[str, None]:
-        sent = 0
-        timeout = 600
-        elapsed = 0.0
+        q = _scan_queues.get(scan_id)
+        if q is None:
+            yield f"data: {json.dumps({'type': 'error', 'data': {'message': 'Scan not found or already expired'}})}\n\n"
+            return
 
-        while elapsed < timeout:
-            events = _scan_events.get(scan_id, [])
-            while sent < len(events):
-                event = events[sent]
+        elapsed = 0.0
+        while elapsed < SCAN_TIMEOUT:
+            try:
+                event = q.get_nowait()
                 yield f"data: {json.dumps(event)}\n\n"
-                sent += 1
                 if event.get("type") in ("done", "error"):
                     return
-            await asyncio.sleep(0.5)
-            elapsed += 0.5
+            except asyncio.QueueEmpty:
+                await asyncio.sleep(0.5)
+                elapsed += 0.5
 
         yield f"data: {json.dumps({'type': 'error', 'data': {'message': 'Scan timed out'}})}\n\n"
 
@@ -283,7 +302,7 @@ async def list_scans(db: AsyncSession = Depends(get_db)):
             "repo_url": r.repo_url,
             "status": r.status.value,
             "language": r.language,
-            "finding_count": len(r.findings_raw or []),
+            "finding_count": r.finding_count or 0,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }
         for r in rows

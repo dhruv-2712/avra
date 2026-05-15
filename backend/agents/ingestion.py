@@ -9,14 +9,15 @@ import os
 import re
 import shutil
 import tempfile
-import urllib.request
 from pathlib import Path
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 
 import git
+import httpx
 
 from models.scan import ScanState, AgentStep, ScanStatus
+from core.config import MAX_REPO_MB
 
 # Language detection by extension
 LANG_MAP = {
@@ -62,7 +63,7 @@ SKIP_DIRS = {
 }
 
 
-def _check_repo_size(repo_url: str, max_mb: int = 150) -> None:
+def _check_repo_size(repo_url: str, max_mb: int = MAX_REPO_MB) -> None:
     """Raise ValueError if a GitHub repo exceeds max_mb. No-ops for non-GitHub URLs."""
     m = re.match(r"https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", repo_url)
     if not m:
@@ -70,9 +71,10 @@ def _check_repo_size(repo_url: str, max_mb: int = 150) -> None:
     owner, repo = m.group(1), m.group(2)
     api_url = f"https://api.github.com/repos/{owner}/{repo}"
     try:
-        req = urllib.request.Request(api_url, headers={"User-Agent": "avra-scanner"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
+        with httpx.Client(timeout=10) as client:
+            resp = client.get(api_url, headers={"User-Agent": "avra-scanner"})
+            resp.raise_for_status()
+            data = resp.json()
         size_kb = data.get("size", 0)
         if size_kb > max_mb * 1024:
             raise ValueError(
@@ -89,7 +91,7 @@ def _step(agent: str, status: str, message: str, data=None) -> AgentStep:
         agent=agent,
         status=status,
         message=message,
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.now(timezone.utc).isoformat(),
         data=data,
     )
 
@@ -102,6 +104,9 @@ def clone_repository(repo_url: str, scan_id: str) -> str:
 
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"  # never open /dev/tty in Docker
+    env["GIT_CONFIG_COUNT"] = "1"
+    env["GIT_CONFIG_KEY_0"] = "credential.helper"
+    env["GIT_CONFIG_VALUE_0"] = ""
 
     git.Repo.clone_from(
         repo_url,
@@ -109,8 +114,6 @@ def clone_repository(repo_url: str, scan_id: str) -> str:
         depth=1,
         single_branch=True,
         env=env,
-        multi_options=["--config credential.helper="],
-        allow_unsafe_options=True,
     )
     return clone_dir
 

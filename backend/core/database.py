@@ -1,10 +1,10 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy import Column, String, DateTime, JSON, Text, Enum as SAEnum
+from sqlalchemy import Column, String, DateTime, JSON, Text, Enum as SAEnum, Integer
 import enum
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def _db_url() -> str:
@@ -39,10 +39,11 @@ class Scan(Base):
     repo_url = Column(String, nullable=False)
     status = Column(SAEnum(ScanStatus), default=ScanStatus.PENDING)
     language = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     findings_raw = Column(JSON, default=list)
     findings_triaged = Column(JSON, default=list)
+    finding_count = Column(Integer, default=0, server_default="0")
     report = Column(JSON, nullable=True)
     report_markdown = Column(Text, nullable=True)
     steps_raw = Column(JSON, default=list)
