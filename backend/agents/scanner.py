@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from models.scan import ScanState, AgentStep, Finding, Severity, ScanStatus
-from core.config import SEMGREP_TIMEOUT, BANDIT_TIMEOUT, SEMGREP_MAX_MEMORY
+import shutil
+import tempfile
+from core.config import SEMGREP_TIMEOUT, BANDIT_TIMEOUT, GITLEAKS_TIMEOUT, OSV_TIMEOUT, SEMGREP_MAX_MEMORY
 
 SEVERITY_MAP_SEMGREP = {
     "ERROR": Severity.HIGH,
@@ -219,6 +221,118 @@ def _extract_cwe(metadata: dict) -> str | None:
     return None
 
 
+def run_gitleaks(local_path: str) -> tuple[list[Finding], str | None]:
+    """Run gitleaks to detect hardcoded secrets."""
+    if not shutil.which("gitleaks"):
+        return [], "gitleaks not installed"
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+            tmp_path = tmp.name
+        result = subprocess.run(
+            ["gitleaks", "detect", "--source", local_path,
+             "--report-format", "json", "--no-git", "--no-banner",
+             "--report-path", tmp_path],
+            capture_output=True, text=True, timeout=GITLEAKS_TIMEOUT,
+        )
+        if result.returncode not in (0, 1):
+            return [], f"gitleaks error: {result.stderr[:200]}"
+        with open(tmp_path) as f:
+            content = f.read().strip()
+        if not content:
+            return [], None
+        data = json.loads(content)
+        if not isinstance(data, list):
+            return [], None
+        findings = []
+        for r in data:
+            try:
+                fp = os.path.relpath(r.get("File", ""), local_path)
+            except ValueError:
+                fp = r.get("File", "")
+            findings.append(Finding(
+                rule_id=f"gitleaks.{r.get('RuleID', 'unknown')}",
+                title=r.get("Description", r.get("RuleID", "Secret Detected")).title(),
+                description=f"Hardcoded secret detected ({r.get('RuleID', 'unknown')}). Remove and rotate this credential immediately.",
+                file_path=fp,
+                line_start=r.get("StartLine", 0),
+                line_end=r.get("EndLine") or None,
+                code_snippet="[REDACTED]",
+                severity=Severity.HIGH,
+                tool="gitleaks",
+                cwe="CWE-798",
+                confidence=0.85,
+            ))
+        return findings, None
+    except subprocess.TimeoutExpired:
+        return [], "gitleaks timed out"
+    except Exception as e:
+        return [], str(e)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+def _osv_severity(vuln: dict) -> Severity:
+    sev = vuln.get("database_specific", {}).get("severity", "").upper()
+    return {"CRITICAL": Severity.CRITICAL, "HIGH": Severity.HIGH,
+            "MODERATE": Severity.MEDIUM, "MEDIUM": Severity.MEDIUM,
+            "LOW": Severity.LOW}.get(sev, Severity.MEDIUM)
+
+
+def run_osv_scanner(local_path: str) -> tuple[list[Finding], str | None]:
+    """Run osv-scanner to detect vulnerable dependencies."""
+    if not shutil.which("osv-scanner"):
+        return [], "osv-scanner not installed"
+    try:
+        result = subprocess.run(
+            ["osv-scanner", "--format", "json", local_path],
+            capture_output=True, text=True, timeout=OSV_TIMEOUT,
+        )
+        if result.returncode not in (0, 1):
+            return [], f"osv-scanner error: {result.stderr[:200]}"
+        output = result.stdout.strip()
+        if not output:
+            return [], None
+        data = json.loads(output)
+        findings = []
+        for result_item in data.get("results", []):
+            source_path = result_item.get("source", {}).get("path", "")
+            try:
+                fp = os.path.relpath(source_path, local_path)
+            except ValueError:
+                fp = source_path
+            for pkg in result_item.get("packages", []):
+                package = pkg.get("package", {})
+                pkg_name = package.get("name", "unknown")
+                pkg_version = package.get("version", "unknown")
+                pkg_ecosystem = package.get("ecosystem", "")
+                for vuln in pkg.get("vulnerabilities", []):
+                    vuln_id = vuln.get("id", "unknown")
+                    aliases = vuln.get("aliases", [])
+                    cve = next((a for a in aliases if a.startswith("CVE-")), None)
+                    summary = vuln.get("summary", f"Vulnerability in {pkg_name}")
+                    findings.append(Finding(
+                        rule_id=f"osv.{vuln_id}",
+                        title=f"{pkg_name}@{pkg_version}: {summary[:80]}",
+                        description=(
+                            f"{pkg_ecosystem} package `{pkg_name}` version `{pkg_version}` "
+                            f"has a known vulnerability ({cve or vuln_id}). {summary}"
+                        ),
+                        file_path=fp,
+                        line_start=0,
+                        severity=_osv_severity(vuln),
+                        tool="osv-scanner",
+                        cwe=cve,
+                        confidence=0.95,
+                    ))
+        return findings, None
+    except subprocess.TimeoutExpired:
+        return [], "osv-scanner timed out"
+    except Exception as e:
+        return [], str(e)
+
+
 def deduplicate_findings(findings: list[Finding]) -> list[Finding]:
     """Remove near-duplicate findings by file + line + rule."""
     seen = set()
@@ -273,6 +387,24 @@ def scanner_agent(state: ScanState) -> ScanState:
                 bandit_msg += f" [warning: {bandit_err[:200]}]"
             state.steps.append(_step(agent_name, "running", bandit_msg))
 
+        # Gitleaks — secrets detection (all languages)
+        state.steps.append(_step(agent_name, "running", "Running Gitleaks (secrets detection)..."))
+        gitleaks_findings, gitleaks_err = run_gitleaks(state.local_path)
+        all_findings.extend(gitleaks_findings)
+        gitleaks_msg = f"Gitleaks complete — {len(gitleaks_findings)} secrets found"
+        if gitleaks_err:
+            gitleaks_msg += f" [warning: {gitleaks_err[:200]}]"
+        state.steps.append(_step(agent_name, "running", gitleaks_msg))
+
+        # OSV-scanner — dependency vulnerabilities (all languages)
+        state.steps.append(_step(agent_name, "running", "Running OSV-Scanner (dependency vulnerabilities)..."))
+        osv_findings, osv_err = run_osv_scanner(state.local_path)
+        all_findings.extend(osv_findings)
+        osv_msg = f"OSV-Scanner complete — {len(osv_findings)} vulnerable dependencies found"
+        if osv_err:
+            osv_msg += f" [warning: {osv_err[:200]}]"
+        state.steps.append(_step(agent_name, "running", osv_msg))
+
         # Deduplicate
         unique_findings = deduplicate_findings(all_findings)
 
@@ -286,6 +418,8 @@ def scanner_agent(state: ScanState) -> ScanState:
                 "by_tool": {
                     "semgrep": len(semgrep_findings),
                     "bandit": len(bandit_findings) if state.language == "Python" else 0,
+                    "gitleaks": len(gitleaks_findings),
+                    "osv-scanner": len(osv_findings),
                 },
                 "by_severity": {
                     sev.value: sum(1 for f in unique_findings if f.severity == sev)

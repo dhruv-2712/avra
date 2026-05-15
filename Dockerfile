@@ -10,8 +10,17 @@ FROM semgrep/semgrep:1.89.0 AS semgrep-binary
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
+    git curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Install gitleaks (secrets detection)
+RUN curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz \
+    | tar xz -C /usr/local/bin gitleaks
+
+# Install osv-scanner (dependency vulnerability scanning)
+RUN curl -sSL -o /usr/local/bin/osv-scanner \
+    https://github.com/google/osv-scanner/releases/download/v1.7.4/osv-scanner_linux_amd64 \
+    && chmod +x /usr/local/bin/osv-scanner
 
 WORKDIR /app
 
